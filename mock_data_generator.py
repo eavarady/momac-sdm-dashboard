@@ -41,12 +41,28 @@ machines = pd.DataFrame(
 )
 machines.to_csv("machines.csv", index=False)
 
-# Production Lines
+# Operators
+operators = pd.DataFrame(
+    {
+        "operator_id": [f"OP-{i+1}" for i in range(num_operators)],
+        "name": [f"Operator {i+1}" for i in range(num_operators)],
+        "role": [
+            random.choice(["Assembler", "Tester", "Supervisor"])
+            for _ in range(num_operators)
+        ],
+    }
+)
+operators.to_csv("operators.csv", index=False)
+
+# Production Lines (with line manager)
 lines = pd.DataFrame(
     {
         "line_id": [f"LINE-{chr(65+i)}" for i in range(num_lines)],
         "name": [f"Assembly Line {chr(65+i)}" for i in range(num_lines)],
         "shift": [random.choice(["day", "night"]) for _ in range(num_lines)],
+        "line_manager_id": [
+            random.choice(operators["operator_id"]) for _ in range(num_lines)
+        ],
     }
 )
 lines.to_csv("production_lines.csv", index=False)
@@ -62,19 +78,6 @@ products = pd.DataFrame(
 )
 products.to_csv("products.csv", index=False)
 
-# Operators
-operators = pd.DataFrame(
-    {
-        "operator_id": [f"OP-{i+1}" for i in range(num_operators)],
-        "name": [f"Operator {i+1}" for i in range(num_operators)],
-        "role": [
-            random.choice(["Assembler", "Tester", "Supervisor"])
-            for _ in range(num_operators)
-        ],
-    }
-)
-operators.to_csv("operators.csv", index=False)
-
 # --- Fact Tables ---
 
 # Process Steps
@@ -88,7 +91,11 @@ for prod_id in products["product_id"]:
                 "step_id": f"{prod_id}-STEP-{idx+1}",
                 "step_name": step_name,
                 "assigned_machine": random.choice(machines["machine_id"]),
-                "assigned_operator": random.choice(operators["operator_id"]),
+                "assigned_operators": ",".join(
+                    random.sample(
+                        list(operators["operator_id"]), k=random.randint(1, 2)
+                    )
+                ),
                 "estimated_time_min": random.randint(10, 60),
                 "dependency_step_id": f"{prod_id}-STEP-{idx}" if idx > 0 else "",
             }
@@ -103,6 +110,10 @@ for _, row in process_steps.iterrows():
         {
             "timestamp": random_timestamp(start_date, end_date),
             "line_id": random.choice(lines["line_id"]),
+            "line_manager_id": lines.loc[
+                lines["line_id"] == row.get("line_id", random.choice(lines["line_id"])),
+                "line_manager_id",
+            ].values[0],
             "product_id": row["product_id"],
             "step_id": row["step_id"],
             "quantity": random.randint(1, 10),
@@ -143,4 +154,4 @@ for _ in range(20):
 quality_checks = pd.DataFrame(quality_checks_list)
 quality_checks.to_csv("quality_checks.csv", index=False)
 
-print("Mock CSV dataset with process steps generated successfully!")
+print("Mock CSV dataset generated successfully!")
