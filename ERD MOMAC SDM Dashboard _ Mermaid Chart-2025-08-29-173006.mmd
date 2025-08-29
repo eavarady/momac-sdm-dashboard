@@ -1,0 +1,68 @@
+---
+config:
+  layout: elk
+---
+erDiagram
+    PRODUCTS {
+        string product_id PK
+        string name
+        string category
+        string spec_version
+    }
+    MACHINES {
+        string machine_id PK
+        string line_id FK
+        string type
+        string status
+    }
+    OPERATORS {
+        string operator_id PK
+        string name
+        string role
+    }
+    PROCESS_STEPS {
+        string step_id PK
+        string product_id FK
+        string step_name
+        string assigned_machine FK
+        string assigned_operators
+        int estimated_time
+        string dependency_step_id FK
+    }
+    PRODUCTION_LINES {
+        string line_id PK
+        string name
+        string shift
+        string line_manager_id FK
+    }
+    PRODUCTION_LOG {
+        string timestamp PK
+        string line_id FK
+        string product_id FK
+        string step_id FK
+        int quantity
+        string status
+    }
+    MACHINE_METRICS {
+        string timestamp PK
+        string machine_id FK
+        string metric_type
+        float metric_value
+    }
+    QUALITY_CHECKS {
+        string timestamp PK
+        string product_id FK
+        string check_type
+        string result
+        string inspector_id FK
+    }
+    PRODUCTS ||--o{ PROCESS_STEPS : has
+    PRODUCTS ||--o{ PRODUCTION_LOG : logged_in
+    MACHINES ||--o{ PROCESS_STEPS : used_in
+    PRODUCTION_LINES ||--o{ PRODUCTION_LOG : contains
+    PRODUCTION_LINES ||--o| OPERATORS : managed_by
+    MACHINES ||--o{ MACHINE_METRICS : produces
+    PROCESS_STEPS ||--o{ PRODUCTION_LOG : executed_in
+    OPERATORS ||--o{ PROCESS_STEPS : assigned_to
+    OPERATORS ||--o{ QUALITY_CHECKS : performs
+    PRODUCTS ||--o{ QUALITY_CHECKS : checked_in
