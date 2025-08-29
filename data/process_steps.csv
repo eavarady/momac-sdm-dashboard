@@ -1,0 +1,13 @@
+product_id,step_id,step_name,assigned_machine,assigned_operators,estimated_time,dependency_step_id
+PRD-1,PRD-1-STEP-1,Unpack,MX-102,OP-2,1,
+PRD-1,PRD-1-STEP-2,Assemble,MX-104,"OP-3,OP-1",0,PRD-1-STEP-1
+PRD-1,PRD-1-STEP-3,Test,MX-101,"OP-3,OP-1",1,PRD-1-STEP-2
+PRD-1,PRD-1-STEP-4,Repack,MX-101,"OP-2,OP-1",1,PRD-1-STEP-3
+PRD-2,PRD-2-STEP-1,Unpack,MX-105,"OP-3,OP-2",0,
+PRD-2,PRD-2-STEP-2,Assemble,MX-104,OP-3,0,PRD-2-STEP-1
+PRD-2,PRD-2-STEP-3,Test,MX-105,OP-1,1,PRD-2-STEP-2
+PRD-2,PRD-2-STEP-4,Repack,MX-101,OP-4,1,PRD-2-STEP-3
+PRD-3,PRD-3-STEP-1,Unpack,MX-104,"OP-1,OP-4",1,
+PRD-3,PRD-3-STEP-2,Assemble,MX-104,OP-3,0,PRD-3-STEP-1
+PRD-3,PRD-3-STEP-3,Test,MX-105,"OP-4,OP-1",1,PRD-3-STEP-2
+PRD-3,PRD-3-STEP-4,Repack,MX-101,"OP-4,OP-3",1,PRD-3-STEP-3
