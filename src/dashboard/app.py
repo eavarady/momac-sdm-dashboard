@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from adapters.csv_adapter import read_csv_tables
 from kpi.kpi_calculator import compute_all_kpis
-from sdm_bottlenecks import detect_bottleneck
+from sdm_bottlenecks.bottleneck_detector import detect_bottleneck, top_bottlenecks
 
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
@@ -29,6 +29,13 @@ bn = detect_bottleneck(
 )
 st.subheader("Bottleneck")
 st.write(bn or "No bottleneck detected.")
+st.subheader("Top Bottlenecks by WIP")
+prod = _tables.get("production_log", pd.DataFrame())
+top3 = top_bottlenecks(prod, top_n=3)
+if top3.empty:
+    st.write("No in-progress work detected.")
+else:
+    st.dataframe(top3, use_container_width=True)
 
 # Data preview
 with st.expander("Preview Data"):

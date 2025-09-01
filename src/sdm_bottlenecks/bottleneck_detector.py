@@ -72,3 +72,48 @@ def detect_bottleneck(
 
     # 8) Return only the step_id for v1 (simple API)
     return str(top["step_id"])
+
+
+def top_bottlenecks(
+    production_log: pd.DataFrame,
+    top_n: int = 3,
+) -> pd.DataFrame:
+    """
+    Return the top-N bottlenecks by WIP (work-in-progress).
+
+    WIP(step) = sum(quantity) over rows where status == "in_progress".
+
+    Args:
+        production_log: DataFrame with at least columns [step_id, status, quantity]
+        top_n: number of top rows to return (default=3)
+
+    Returns:
+        DataFrame with columns ["step_id", "total_wip"], sorted by WIP desc then step_id.
+    """
+    if production_log is None or production_log.empty:
+        return pd.DataFrame(columns=["step_id", "total_wip"])
+
+    df = production_log.copy()
+    if not {"step_id", "status", "quantity"}.issubset(df.columns):
+        return pd.DataFrame(columns=["step_id", "total_wip"])
+
+    # Clean quantities
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
+    df = df.dropna(subset=["quantity"])
+    df = df[df["quantity"] > 0]
+
+    # Filter WIP
+    df["status"] = df["status"].astype(str).str.lower()
+    wip = df[df["status"] == "in_progress"]
+    if wip.empty:
+        return pd.DataFrame(columns=["step_id", "total_wip"])
+
+    wip["step_id"] = wip["step_id"].astype(str)
+
+    # Aggregate and sort
+    agg = (
+        wip.groupby("step_id")["quantity"].sum().reset_index(name="total_wip")
+    )
+    agg = agg.sort_values(by=["total_wip", "step_id"], ascending=[False, True])
+
+    return agg.head(top_n).reset_index(drop=True)
