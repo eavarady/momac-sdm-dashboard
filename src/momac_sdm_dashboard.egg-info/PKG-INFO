@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: momac-sdm-dashboard
+Version: 0.1.0
+Summary: MOMAC Software-Defined Manufacturing Dashboard
+Author: MOMAC
+License-File: LICENSE
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: numpy>=1.25.0
+Requires-Dist: streamlit>=1.31.0
+Requires-Dist: pydantic>=2.6.0
+Requires-Dist: python-dateutil>=2.8.2
+Requires-Dist: openpyxl>=3.1.2
+Dynamic: author
+Dynamic: license-file
+Dynamic: requires-dist
+Dynamic: summary

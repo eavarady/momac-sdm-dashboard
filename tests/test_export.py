@@ -1,6 +1,6 @@
 import pandas as pd
 from pathlib import Path
-from src.export.csv_exporter import export_tables
+from export.csv_exporter import export_tables
 
 
 def test_export(tmp_path: Path):

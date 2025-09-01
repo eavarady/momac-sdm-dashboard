@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from src.workflow.validator import steps_from_dataframe, validate_dependencies
+from workflow.validator import steps_from_dataframe, validate_dependencies
 
 
 @pytest.mark.xfail(reason="Workflow validator is placeholder")

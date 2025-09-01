@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from src.bottleneck.bottleneck_detector import detect_bottleneck
+from sdm_bottlenecks import detect_bottleneck
 
 
 @pytest.mark.xfail(reason="Bottleneck logic is placeholder")

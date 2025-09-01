@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from src.kpi.kpi_calculator import compute_all_kpis
+from kpi.kpi_calculator import compute_all_kpis
 
 
 @pytest.mark.xfail(reason="KPI logic is placeholder")

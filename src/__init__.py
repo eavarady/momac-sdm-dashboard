@@ -2,7 +2,7 @@ __all__ = [
     "adapters",
     "workflow",
     "kpi",
-    "bottleneck",
+    "sdm_bottlenecks",
     "dashboard",
     "export",
     "utils",

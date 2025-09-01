@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
-from src.adapters.csv_adapter import read_csv_tables
-from src.kpi.kpi_calculator import compute_all_kpis
-from src.bottleneck.bottleneck_detector import detect_bottleneck
+from adapters.csv_adapter import read_csv_tables
+from kpi.kpi_calculator import compute_all_kpis
+from sdm_bottlenecks import detect_bottleneck
 
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
