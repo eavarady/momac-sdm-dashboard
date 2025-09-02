@@ -5,56 +5,30 @@ from datetime import datetime, timedelta
 
 
 def compute_throughput(production_log: pd.DataFrame) -> float:
-    # Throughput is the total quantity produced divided by the total time taken
-    # TODO: Implement timestamp conversion to local time
-    # production_log["timestamp"] = production_log["timestamp"].dt.tz_convert("local_tz")
-    # If there are no valid timestamps, return 0.0
+    # Assumes adapter normalized timestamps, quantity, and status
     if production_log.empty:
         return 0.0
-    df = production_log.copy()
-
-    # Parse timestamps (strings like "2025-06-29T12:34:38Z" → UTC datetimes)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
-
-    # Clean quantities
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
-    df = df.dropna(subset=["timestamp", "quantity"])
-    df = df[df["quantity"] > 0]
-    if df.empty:
-        return 0.0
-
-    # Use only completed items for throughput (sensible definition)
-    produced = df[df["status"].astype(str).str.lower() == "complete"] if "status" in df.columns else df
+    df = production_log
+    produced = df[df["status"] == "complete"] if "status" in df.columns else df
     if produced.empty:
         return 0.0
-
-    # Time window across the (cleaned) dataset
-    t_min = df["timestamp"].min()
-    t_max = df["timestamp"].max()
+    # Use completed events' span for the denominator
+    t_min = produced["timestamp"].min()
+    t_max = produced["timestamp"].max()
     total_time = t_max - t_min
     if total_time.total_seconds() <= 0:
         return 0.0
-
     return float(produced["quantity"].sum()) / total_time.total_seconds()
-
-
 
 
 # TODO: Implement drill-down and roll-up functionality for time periods
 
 
 def compute_wip(production_log: pd.DataFrame) -> int:
-    # WIP is the total quantity of items currently in progress
-    if production_log.empty:
+    # Assumes adapter normalized quantity/status
+    if production_log.empty or "status" not in production_log.columns:
         return 0
-    df = production_log.copy()
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
-    df = df.dropna(subset=["quantity"])
-    df = df[df["quantity"] > 0]
-    if df.empty or "status" not in df.columns:
-        return 0
-    df["status"] = df["status"].astype(str).str.lower()
-    in_progress = df[df["status"] == "in_progress"]
+    in_progress = production_log[production_log["status"] == "in_progress"]
     return int(in_progress["quantity"].sum())
 
 
