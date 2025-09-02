@@ -11,13 +11,33 @@ def compute_throughput(production_log: pd.DataFrame) -> float:
     # If there are no valid timestamps, return 0.0
     if production_log.empty:
         return 0.0
-    # Total time in ZULU time, from the first to the last timestamp of the data set
-    total_time = production_log["timestamp"].max() - production_log["timestamp"].min()
-    # If the total time is zero, return 0.0 to avoid division by zero
-    if total_time == timedelta(0):
+    df = production_log.copy()
+
+    # Parse timestamps (strings like "2025-06-29T12:34:38Z" → UTC datetimes)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+
+    # Clean quantities
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
+    df = df.dropna(subset=["timestamp", "quantity"])
+    df = df[df["quantity"] > 0]
+    if df.empty:
         return 0.0
-    # Compute throughput as quantity produced per second
-    return production_log["quantity"].sum() / total_time.total_seconds()
+
+    # Use only completed items for throughput (sensible definition)
+    produced = df[df["status"].astype(str).str.lower() == "complete"] if "status" in df.columns else df
+    if produced.empty:
+        return 0.0
+
+    # Time window across the (cleaned) dataset
+    t_min = df["timestamp"].min()
+    t_max = df["timestamp"].max()
+    total_time = t_max - t_min
+    if total_time.total_seconds() <= 0:
+        return 0.0
+
+    return float(produced["quantity"].sum()) / total_time.total_seconds()
+
+
 
 
 # TODO: Implement drill-down and roll-up functionality for time periods
@@ -27,9 +47,14 @@ def compute_wip(production_log: pd.DataFrame) -> int:
     # WIP is the total quantity of items currently in progress
     if production_log.empty:
         return 0
-    # Count the number of items in progress
-    in_progress = production_log[production_log["status"] == "in_progress"]
-    # Sum the quantities of items in progress
+    df = production_log.copy()
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
+    df = df.dropna(subset=["quantity"])
+    df = df[df["quantity"] > 0]
+    if df.empty or "status" not in df.columns:
+        return 0
+    df["status"] = df["status"].astype(str).str.lower()
+    in_progress = df[df["status"] == "in_progress"]
     return int(in_progress["quantity"].sum())
 
 
