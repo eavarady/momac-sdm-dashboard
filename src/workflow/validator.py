@@ -39,8 +39,11 @@ def validate_dependencies(steps: List[Step]) -> List[str]:
         edges: Dict[str, str] = {}
         for p in plist:
             dep = getattr(p, "dependency_step_id", None)
-            if dep is None or (isinstance(dep, str) and dep.strip() == ""):
+
+            # Treat NaN/blank as "no dependency"
+            if pd.isna(dep) or (isinstance(dep, str) and dep.strip() == "") or dep is None:
                 continue  # Start step (no dependency)
+
             dep_id = str(dep)
             child_id = str(p.step_id)
             if dep_id not in nodes:
@@ -156,9 +159,10 @@ def steps_from_dataframe(df: pd.DataFrame) -> List[Step]:
         # Dependency: normalize to None if blank
         dep_raw = row.get("dependency_step_id", None)
         dep = None
-        if pd.notna(dep_raw):
+        if not pd.isna(dep_raw):
             dep_str = str(dep_raw).strip()
-            dep = dep_str if dep_str else None
+            if dep_str:
+                dep = dep_str
 
         steps.append(
             Step(

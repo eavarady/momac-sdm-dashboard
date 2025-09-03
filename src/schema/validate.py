@@ -17,7 +17,7 @@ TABLE_REGISTRY: Dict[str, Tuple[Type[BaseModel], Tuple[str, ...]]] = {
     "process_steps": (ProcessStepRow, ("product_id", "step_id", "step_name",
                                        "assigned_machine", "assigned_operators",
                                        "estimated_time", "dependency_step_id")),
-    "production_log": (ProductionLogRow, ("timestamp", "line_id", "product_id", "step_id", "quantity", "status")),
+    "production_log": (ProductionLogRow, ("timestamp", "start_time", "end_time", "line_id", "product_id", "step_id", "quantity", "status")),
     "machine_metrics": (MachineMetricRow, ("timestamp", "machine_id", "metric_type", "metric_value")),
     "quality_checks": (QualityCheckRow, ("timestamp", "product_id", "check_type", "result", "inspector_id")),
 }

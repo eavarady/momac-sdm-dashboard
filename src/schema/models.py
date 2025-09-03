@@ -31,11 +31,23 @@ class MachineRow(_Row):
 
     @field_validator("machine_id", "line_id", "type", mode="before")
     @classmethod
-    def _strip(cls, v): return str(v).strip()
+    def _strip(cls, v):
+        return str(v).strip()
 
     @field_validator("status", mode="before")
     @classmethod
-    def _status_norm(cls, v): return str(v).strip().lower()
+    def _status_norm(cls, v):
+        s = str(v).strip().lower()
+        # map common synonyms to canonical values
+        synonyms = {
+            "active": "online",
+            "up": "online",
+            "down": "offline",
+            "stopped": "offline",
+            "maint": "maintenance",
+            "maintenance": "maintenance",
+        }
+        return synonyms.get(s, s)
 
 
 class ProductionLineRow(_Row):
@@ -45,7 +57,8 @@ class ProductionLineRow(_Row):
 
     @field_validator("line_id", "name", "shift", mode="before")
     @classmethod
-    def _strip(cls, v): return str(v).strip()
+    def _strip(cls, v):
+        return str(v).strip()
 
 
 class ProductRow(_Row):
@@ -56,7 +69,8 @@ class ProductRow(_Row):
 
     @field_validator("product_id", "name", "category", "spec_version", mode="before")
     @classmethod
-    def _strip(cls, v): return str(v).strip()
+    def _strip(cls, v):
+        return str(v).strip()
 
 
 class OperatorRow(_Row):
@@ -66,7 +80,8 @@ class OperatorRow(_Row):
 
     @field_validator("operator_id", "name", "role", mode="before")
     @classmethod
-    def _strip(cls, v): return str(v).strip()
+    def _strip(cls, v):
+        return str(v).strip()
 
 
 # ---- Process steps ----------------------------------------------------------
@@ -89,9 +104,12 @@ class ProcessStepRow(_Row):
     @field_validator("assigned_operators", mode="before")
     @classmethod
     def _ops_parse(cls, v):
-        if v is None: return []
-        if isinstance(v, list): items = v
-        else: items = str(v).split(",")
+        if v is None:
+            return []
+        if isinstance(v, list):
+            items = v
+        else:
+            items = str(v).split(",")
         out: list[str] = []
         for it in items:
             it = str(it).strip()
@@ -102,7 +120,8 @@ class ProcessStepRow(_Row):
     @field_validator("estimated_time", mode="before")
     @classmethod
     def _et_int(cls, v):
-        if v is None: return 0
+        if v is None:
+            return 0
         try:
             iv = int(float(v))
             return max(0, iv)
@@ -112,14 +131,19 @@ class ProcessStepRow(_Row):
     @field_validator("dependency_step_id", mode="before")
     @classmethod
     def _dep_norm(cls, v):
-        if v is None: return None
+        if v is None:
+            return None
         s = str(v).strip()
-        return s or None
+        # treat common sentinels as empty
+        if s == "" or s.lower() in {"nan", "none"}:
+            return None
+        return s
 
     @field_validator("step_name")
     @classmethod
     def _fallback_name(cls, v, info):
-        if v: return v
+        if v:
+            return v
         step_id = info.data.get("step_id", "")
         return step_id
 
@@ -127,33 +151,73 @@ class ProcessStepRow(_Row):
 # ---- Fact tables ------------------------------------------------------------
 
 class ProductionLogRow(_Row):
+    # Include start/end times so Actual Gantt can render,
+    # and enforce logical rules tied to status.
     timestamp: datetime
+    start_time: datetime
+    end_time: Optional[datetime] = None
     line_id: str
     product_id: str
     step_id: str
     quantity: int = Field(ge=0)
     status: Literal["in_progress", "complete"]
 
-    @field_validator("timestamp", mode="before")
+    # Required timestamps: must parse
+    @field_validator("timestamp", "start_time", mode="before")
     @classmethod
-    def _ts_parse(cls, v): return _parse_utc(v)
+    def _ts_required(cls, v):
+        return _parse_utc(v)
+
+    # Optional timestamp: treat NaN/blank as None
+    @field_validator("end_time", mode="before")
+    @classmethod
+    def _ts_optional(cls, v):
+        try:
+            import pandas as pd  # optional dependency; available in your env
+            if v is None or (isinstance(v, str) and not v.strip()) or pd.isna(v):
+                return None
+        except Exception:
+            if v is None or (isinstance(v, str) and not v.strip()):
+                return None
+        return _parse_utc(v)
 
     @field_validator("line_id", "product_id", "step_id", mode="before")
     @classmethod
-    def _strip(cls, v): return str(v).strip()
+    def _strip(cls, v):
+        return str(v).strip()
 
     @field_validator("status", mode="before")
     @classmethod
-    def _status_norm(cls, v): return str(v).strip().lower()
+    def _status_norm(cls, v):
+        s = str(v).strip().lower()
+        # normalize common synonyms
+        return {"completed": "complete", "inprogress": "in_progress"}.get(s, s)
 
     @field_validator("quantity", mode="before")
     @classmethod
     def _qty_int(cls, v):
-        if v is None: return 0
+        if v is None:
+            return 0
         try:
             return max(0, int(float(v)))
         except Exception:
             return 0
+
+    @field_validator("end_time")
+    @classmethod
+    def _check_time_logic(cls, end, info):
+        status = info.data.get("status")
+        start = info.data.get("start_time")
+        # For completed rows: end_time required and >= start_time
+        if status == "complete":
+            if end is None:
+                raise ValueError("end_time required when status is 'complete'")
+            if start is not None and end < start:
+                raise ValueError("end_time must be >= start_time for completed rows")
+        # For in-progress rows: end_time must be empty
+        if status == "in_progress" and end is not None:
+            raise ValueError("end_time must be empty when status is 'in_progress'")
+        return end
 
 
 class MachineMetricRow(_Row):
@@ -164,11 +228,13 @@ class MachineMetricRow(_Row):
 
     @field_validator("timestamp", mode="before")
     @classmethod
-    def _ts_parse(cls, v): return _parse_utc(v)
+    def _ts_parse(cls, v):
+        return _parse_utc(v)
 
     @field_validator("machine_id", "metric_type", mode="before")
     @classmethod
-    def _strip(cls, v): return str(v).strip()
+    def _strip(cls, v):
+        return str(v).strip()
 
 
 class QualityCheckRow(_Row):
@@ -180,10 +246,19 @@ class QualityCheckRow(_Row):
 
     @field_validator("timestamp", mode="before")
     @classmethod
-    def _ts_parse(cls, v): return _parse_utc(v)
+    def _ts_parse(cls, v):
+        return _parse_utc(v)
 
-    @field_validator("product_id", "check_type", "result", "inspector_id", mode="before")
+    @field_validator("result", mode="before")
     @classmethod
-    def _strip(cls, v):
-        if v is None: return None
+    def _result_norm(cls, v):
+        s = str(v).strip().lower()
+        # map common synonyms
+        return {"passed": "pass", "ok": "pass", "failed": "fail"}.get(s, s)
+
+    @field_validator("product_id", "check_type", "inspector_id", mode="before")
+    @classmethod
+    def _strip_nullable(cls, v):
+        if v is None:
+            return None
         return str(v).strip() or None
