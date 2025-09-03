@@ -281,7 +281,9 @@ def read_csv_tables() -> Dict[str, pd.DataFrame]:
                     )
                 elif name == "products":
                     df = _normalize_dimension_table(
-                        df, ["product_id", "name", "category"], pk="product_id"
+                        df,
+                        ["product_id", "name", "category", "spec_version"],
+                        pk="product_id",
                     )
                 elif name == "operators":
                     df = _normalize_dimension_table(

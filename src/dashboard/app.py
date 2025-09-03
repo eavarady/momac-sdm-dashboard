@@ -5,6 +5,7 @@ os.environ.setdefault("PANDAS_USE_BOTTLENECK", "0")
 import streamlit as st
 import pandas as pd
 from adapters.csv_adapter import read_csv_tables, get_last_load_stats
+from adapters.sheets_adapter import read_sheets
 from kpi.kpi_calculator import compute_all_kpis
 from sdm_bottlenecks.bottleneck_detector import detect_bottleneck, top_bottlenecks
 
@@ -14,16 +15,40 @@ st.title("MOMAC SDM Dashboard")
 
 with st.sidebar:
     st.header("Data Source")
-    st.caption("Reading from local CSVs in data/")
+    source = st.radio("Select source", ["CSV", "Google Sheets"], index=0)
+    if source == "Google Sheets":
+        st.caption("OAuth will prompt in your browser on first use.")
+        spreadsheet_id = st.text_input("Spreadsheet ID", placeholder="1AbC...xyz")
+        title_map_json = st.text_area(
+            'Optional: Title map JSON (e.g. {"production_log": "Prod Log"})',
+            value="",
+            height=80,
+        )
+        title_map = None
+        if title_map_json.strip():
+            try:
+                import json
+
+                title_map = json.loads(title_map_json)
+            except Exception as je:
+                st.warning(f"Could not parse title map JSON: {je}")
+    else:
+        st.caption("Reading from local CSVs in data/")
 
 # Load data (fast-fail): if any table is invalid, surface the error and stop
 try:
-    _tables = read_csv_tables()
+    if source == "CSV":
+        _tables = read_csv_tables()
+    else:
+        if not spreadsheet_id:
+            st.stop()
+        _tables = read_sheets(spreadsheet_id=spreadsheet_id, title_map=title_map)
 except Exception as e:
     st.error(f"Data load failed: {e}")
-    stats = get_last_load_stats()
-    st.subheader("Last load stats")
-    st.json(stats)
+    if source == "CSV":
+        stats = get_last_load_stats()
+        st.subheader("Last load stats")
+        st.json(stats)
     st.stop()
 
 # KPIs

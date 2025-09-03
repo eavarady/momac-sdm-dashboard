@@ -1,3 +1,28 @@
+## Google Sheets (OAuth, Desktop App)
+
+To read data from Google Sheets using OAuth (no service account required):
+
+1) Create OAuth Client ID (Desktop app)
+	- Go to Google Cloud Console > APIs & Services > Enabled APIs: enable "Google Sheets API".
+	- OAuth consent screen: set User Type to External, add your Google account as a Test user.
+	- Credentials > Create Credentials > OAuth client ID > Application type: Desktop app.
+	- Download the JSON and save it as `.secrets/client_secret.json` at the repo root.
+
+2) First-time authorization (browser prompt)
+	- On first run, a browser opens for consent; a token is saved to `.secrets/token.json` for future runs.
+
+3) Sheet access
+	- Ensure the Google account you use for consent has at least Viewer access to the target spreadsheet.
+	- Use the spreadsheet ID (the long ID in the URL) when calling the adapter.
+
+Where files go
+- Place the OAuth client JSON at: `.secrets/client_secret.json`
+- The adapter will cache the user token at: `.secrets/token.json`
+
+Note
+- This uses read-only scope: `https://www.googleapis.com/auth/spreadsheets.readonly`.
+- For headless/CI usage, prefer a service account instead.
+
 # MOMAC SDM Dashboard
 
 Purpose
