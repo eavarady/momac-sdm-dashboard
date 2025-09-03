@@ -8,6 +8,7 @@ from adapters.csv_adapter import read_csv_tables, get_last_load_stats
 from adapters.sheets_adapter import read_sheets
 from kpi.kpi_calculator import compute_all_kpis
 from sdm_bottlenecks.bottleneck_detector import detect_bottleneck, top_bottlenecks
+from visualizations.gantt import GanttChart
 
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
@@ -87,3 +88,21 @@ with st.expander("Preview Data"):
     for name, df in _tables.items():
         st.markdown(f"### {name}")
         st.dataframe(df.head(20))
+
+# Gantt charts
+st.subheader("Gantt")
+chart = GanttChart()
+prod = _tables.get("production_log", pd.DataFrame())
+steps = _tables.get("process_steps", pd.DataFrame())
+
+fig_actual = chart.actual_gantt(prod)
+if fig_actual is not None:
+    st.plotly_chart(fig_actual, use_container_width=True)
+else:
+    st.info("Actual Gantt unavailable (needs start_time/end_time in production_log).")
+
+fig_planned = chart.planned_gantt(steps)
+if fig_planned is not None:
+    st.plotly_chart(fig_planned, use_container_width=True)
+else:
+    st.info("Planned Gantt unavailable (needs process_steps with estimated_time).")
