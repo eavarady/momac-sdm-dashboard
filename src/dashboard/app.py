@@ -73,8 +73,8 @@ bn = detect_bottleneck(
     _tables.get("process_steps", pd.DataFrame()),
     _tables.get("production_log", pd.DataFrame()),
 )
-st.subheader("Largest bottleneck")
-st.write(bn or "No bottleneck detected.")
+# st.subheader("Largest bottleneck")
+# st.write(bn or "No bottleneck detected.")
 st.subheader("Top 3 Bottlenecks by WIP")
 prod = _tables.get("production_log", pd.DataFrame())
 top3 = top_bottlenecks(prod, top_n=3)
