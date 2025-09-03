@@ -3,7 +3,6 @@ import pytest
 from kpi.kpi_calculator import compute_all_kpis
 
 
-@pytest.mark.xfail(reason="KPI logic is placeholder")
 def test_kpis_basic():
     prod_log = pd.DataFrame(
         [
@@ -14,3 +13,5 @@ def test_kpis_basic():
     kpis = compute_all_kpis({"production_log": prod_log})
     assert kpis["throughput"] == 5.0
     assert kpis["wip"] == 2
+    assert kpis["schedule_efficiency"] == 0.0
+    # assert kpis["on_time_rate"] == pytest.approx(0.0)  # Not implemented yet
