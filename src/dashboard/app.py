@@ -83,11 +83,7 @@ if top3.empty:
 else:
     st.dataframe(top3, use_container_width=True)
 
-# Data preview
-with st.expander("Preview Data"):
-    for name, df in _tables.items():
-        st.markdown(f"### {name}")
-        st.dataframe(df.head(20))
+
 
 # Gantt charts
 st.subheader("Gantt")
@@ -106,3 +102,15 @@ if fig_planned is not None:
     st.plotly_chart(fig_planned, use_container_width=True)
 else:
     st.info("Planned Gantt unavailable (needs process_steps with estimated_time).")
+
+
+
+
+
+# Data preview. 
+# NOTE: Let's keep this at the bottom as a footer when adding future data viz content.
+st.divider()
+with st.expander("Preview Data"):
+    for name, df in _tables.items():
+        st.markdown(f"### {name}")
+        st.dataframe(df.head(20))
