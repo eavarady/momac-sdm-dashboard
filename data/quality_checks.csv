@@ -1,9 +1,5 @@
 timestamp,product_id,check_type,result,inspector_id
-2025-07-25T10:05:04Z,PRD-1,functional,fail,OP-1
-2025-02-22T03:41:02Z,PRD-2,visual,pass,OP-2
-2025-04-16T18:28:09Z,PRD-2,functional,pass,OP-3
-2025-03-21T01:39:52Z,PRD-3,functional,fail,OP-4
-2025-04-08T12:37:10Z,PRD-1,visual,fail,OP-3
+2025-01-20T17:28:48Z,PRD-1,functional,fail,OP-3
 2025-01-18T02:55:06Z,PRD-1,dimensional,pass,OP-3
 2025-03-04T18:03:11Z,PRD-3,dimensional,fail,OP-1
 2025-02-13T10:44:24Z,PRD-1,functional,pass,OP-1
@@ -19,3 +15,7 @@ timestamp,product_id,check_type,result,inspector_id
 2025-06-04T17:58:19Z,PRD-2,dimensional,pass,OP-3
 2025-05-17T08:55:08Z,PRD-3,functional,fail,OP-3
 2025-01-11T17:15:20Z,PRD-1,dimensional,pass,OP-3
+2025-01-15T20:34:58Z,PRD-1,functional,fail,OP-3
+2025-05-02T19:41:04Z,PRD-2,functional,pass,OP-4
+2025-08-12T22:11:24Z,PRD-1,dimensional,pass,OP-4
+2025-01-01T15:45:49Z,PRD-3,functional,pass,OP-3

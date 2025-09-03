@@ -119,20 +119,40 @@ def generate_mock_data(
     process_steps = pd.DataFrame(process_steps_rows)
     process_steps.to_csv(DATA / "process_steps.csv", index=False)
 
-    # Production Log (no line_manager_id; status uses 'in_progress' or 'complete')
+    # Production Log (add start_time/end_time; keep legacy timestamp for compatibility)
     def rand_status() -> str:
         return random.choice(["in_progress", "complete"])
 
     production_log_rows = []
     for _, s in process_steps.iterrows():
+        # choose a start_time within window
+        start_iso = rand_ts_iso(start_date, end_date)
+        start_dt = datetime.strptime(start_iso, "%Y-%m-%dT%H:%M:%SZ")
+        status = rand_status()
+        qty = random.randint(1, 10)
+        # derive a rough duration around estimated_time (0.5x - 1.5x hours)
+        est_hours = float(s.get("estimated_time", 1) or 1)
+        jitter = random.uniform(0.5, 1.5)
+        dur_seconds = int(est_hours * jitter * 3600)
+        if status == "complete":
+            end_dt = start_dt + timedelta(seconds=dur_seconds)
+            end_iso = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            # legacy timestamp = completion time for complete rows
+            ts_iso = end_iso
+        else:
+            end_iso = ""
+            # legacy timestamp = start time for in_progress rows
+            ts_iso = start_iso
         production_log_rows.append(
             {
-                "timestamp": rand_ts_iso(start_date, end_date),
+                "timestamp": ts_iso,
+                "start_time": start_iso,
+                "end_time": end_iso,
                 "line_id": random.choice(lines["line_id"]),
                 "product_id": s["product_id"],
                 "step_id": s["step_id"],
-                "quantity": random.randint(1, 10),
-                "status": rand_status(),
+                "quantity": qty,
+                "status": status,
             }
         )
     production_log = pd.DataFrame(production_log_rows)

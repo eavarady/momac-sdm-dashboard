@@ -13,14 +13,20 @@ def _normalize_production_log(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     out = df.copy()
-    # Required columns must exist
-    required_cols = ["timestamp", "quantity", "status"]
+    # Required columns must exist (legacy 'timestamp' kept for now)
+    required_cols = ["timestamp", "start_time", "quantity", "status"]
     missing = [c for c in required_cols if c not in out.columns]
     if missing:
         raise ValueError(f"production_log missing required columns: {missing}")
 
     # Parse timestamps from ISO 8601 Z to tz-aware UTC; mark bad as NaT then fail if any
     out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
+    out["start_time"] = pd.to_datetime(out.get("start_time"), utc=True, errors="coerce")
+    if "end_time" in out.columns:
+        out["end_time"] = pd.to_datetime(out["end_time"], utc=True, errors="coerce")
+    else:
+        # Back-compat: if no end_time column, create it empty
+        out["end_time"] = pd.NaT
 
     # Coerce quantity to numeric and validate > 0 for all rows
     out["quantity"] = pd.to_numeric(out["quantity"], errors="coerce")
@@ -40,19 +46,42 @@ def _normalize_production_log(df: pd.DataFrame) -> pd.DataFrame:
             )
         )
 
-    # Validate no NaT timestamps, no NaN quantities, quantities > 0, and status in allowed set
-    bad_ts = out["timestamp"].isna()
+    # Validate fields
+    bad_ts = out["timestamp"].isna()  # legacy column must parse
+    bad_start = out["start_time"].isna()
     bad_qty_nan = out["quantity"].isna()
     bad_qty_nonpos = out["quantity"] <= 0
     allowed_status = {"in_progress", "complete"}
     bad_status = ~out["status"].isin(allowed_status)
-    invalid_mask = bad_ts | bad_qty_nan | bad_qty_nonpos | bad_status
+    # Status-specific rules
+    is_complete = out["status"] == "complete"
+    is_inprog = out["status"] == "in_progress"
+    # For complete: end_time required and >= start_time
+    bad_end_missing_for_complete = is_complete & out["end_time"].isna()
+    bad_end_before_start = is_complete & (out["end_time"] < out["start_time"])
+    # For in_progress: end_time must be NaT (not filled yet)
+    bad_end_present_for_inprog = is_inprog & out["end_time"].notna()
+
+    invalid_mask = (
+        bad_ts
+        | bad_start
+        | bad_qty_nan
+        | bad_qty_nonpos
+        | bad_status
+        | bad_end_missing_for_complete
+        | bad_end_before_start
+        | bad_end_present_for_inprog
+    )
     if invalid_mask.any():
         counts = {
             "bad_timestamp": int(bad_ts.sum()),
+            "bad_start_time": int(bad_start.sum()),
             "bad_quantity_nan": int(bad_qty_nan.sum()),
             "bad_quantity_nonpos": int(bad_qty_nonpos.sum()),
             "bad_status": int(bad_status.sum()),
+            "bad_end_missing_for_complete": int(bad_end_missing_for_complete.sum()),
+            "bad_end_before_start": int(bad_end_before_start.sum()),
+            "bad_end_present_for_in_progress": int(bad_end_present_for_inprog.sum()),
         }
         raise ValueError(f"production_log validation failed: {counts}")
     return out
