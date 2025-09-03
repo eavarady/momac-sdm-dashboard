@@ -38,7 +38,9 @@ col3.metric(
     "Throughput (units/week)", f"{(kpis.get('throughput') * 3600.0 * 24 * 7):.1f}"
 )
 col4.metric("WIP (Qty)", f"{kpis.get('wip', 0)}")
-col5.metric("On-Time Rate", f"{(kpis.get('on_time_rate') or 0.0)*100:.1f}%")
+# schedule_efficiency displays as an index (e.g., 0.83x, 1.12x)
+col5.metric("Schedule Efficiency", f"{(kpis.get('schedule_efficiency') or 0.0):.2f}x")
+# col5.metric("On-Time Rate", f"{(kpis.get('on_time_rate') or 0.0)*100:.1f}%")
 
 # Bottleneck
 bn = detect_bottleneck(
