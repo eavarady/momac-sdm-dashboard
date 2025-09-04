@@ -2,6 +2,7 @@ adapters
 dashboard
 export
 kpi
+schema
 sdm_bottlenecks
 utils
 workflow

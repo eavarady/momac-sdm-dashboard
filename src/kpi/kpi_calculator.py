@@ -1,45 +1,25 @@
 import pandas as pd
-import numpy as np
 from typing import Dict
-from datetime import datetime, timedelta
 
 
 def compute_throughput(production_log: pd.DataFrame) -> float:
-    # Defensive: empty or missing quantity -> 0.0
+    """Compute throughput (units/sec) from normalized production_log.
+
+    Preconditions (enforced by data layer):
+    - Columns: timestamp (tz-aware), quantity (numeric), status in {in_progress, complete}
+    - For completed rows, timestamps are valid; quantities are > 0
+    """
     if production_log.empty:
         return 0.0
-
-    df = production_log.copy()
-
-    # Normalize status so tests using "completed" still work
-    if "status" in df.columns:
-        df["status"] = (
-            df["status"].astype(str).str.strip().str.lower().replace({"completed": "complete"})
-        )
-
-    # Quantity as numeric (coerce bad to 0)
-    if "quantity" not in df.columns:
-        return 0.0
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
-
-    # If no usable timestamps, fall back to sum of completed quantities
-    if "timestamp" not in df.columns or df["timestamp"].isna().all():
-        return float(df["quantity"].sum())
-
-    # Time-based throughput: qty per second over completed window
+    df = production_log
     produced = df[df["status"] == "complete"] if "status" in df.columns else df
     if produced.empty:
         return 0.0
-
     t_min = produced["timestamp"].min()
     t_max = produced["timestamp"].max()
-    # Guard against invalid/identical timestamps
-    if pd.isna(t_min) or pd.isna(t_max):
-        return float(df["quantity"].sum())
     total_time = t_max - t_min
-    if total_time.total_seconds() <= 0:
-        return float(df["quantity"].sum())
-
+    if pd.isna(t_min) or pd.isna(t_max) or total_time.total_seconds() <= 0:
+        return 0.0
     return float(produced["quantity"].sum()) / total_time.total_seconds()
 
 
@@ -47,26 +27,13 @@ def compute_throughput(production_log: pd.DataFrame) -> float:
 
 
 def compute_wip(production_log: pd.DataFrame) -> int:
-    if production_log.empty:
+    """Sum of quantities for in-progress rows from normalized production_log."""
+    if production_log.empty or "status" not in production_log.columns:
         return 0
-
-    df = production_log.copy()
-
-    # Normalize status (handle "completed" vs "complete")
-    if "status" in df.columns:
-        df["status"] = (
-            df["status"].astype(str).str.strip().str.lower().replace({"completed": "complete"})
-        )
-    else:
-        return 0
-
-    # Sum quantities where status == in_progress
-    in_progress = df[df["status"] == "in_progress"]
+    in_progress = production_log[production_log["status"] == "in_progress"]
     if in_progress.empty:
         return 0
-
-    qty = pd.to_numeric(in_progress["quantity"], errors="coerce").fillna(0).sum()
-    return int(qty)
+    return int(in_progress["quantity"].sum())
 
 
 # TODO: Implement on-time rate calculation

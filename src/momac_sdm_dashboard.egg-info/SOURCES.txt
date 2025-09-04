@@ -15,6 +15,9 @@ src/momac_sdm_dashboard.egg-info/SOURCES.txt
 src/momac_sdm_dashboard.egg-info/dependency_links.txt
 src/momac_sdm_dashboard.egg-info/requires.txt
 src/momac_sdm_dashboard.egg-info/top_level.txt
+src/schema/__init__.py
+src/schema/models.py
+src/schema/validate.py
 src/sdm_bottlenecks/__init__.py
 src/sdm_bottlenecks/bottleneck_detector.py
 src/utils/__init__.py
@@ -26,4 +29,5 @@ src/workflow/workflow.py
 tests/test_bottleneck.py
 tests/test_export.py
 tests/test_kpi.py
+tests/test_schema_validate.py
 tests/test_workflow.py
