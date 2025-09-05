@@ -6,8 +6,8 @@ def compute_throughput(production_log: pd.DataFrame) -> float:
     """Compute throughput (units/sec) from normalized production_log.
 
     Preconditions (enforced by data layer):
-    - Columns: timestamp (tz-aware), quantity (numeric), status in {in_progress, complete}
-    - For completed rows, timestamps are valid; quantities are > 0
+    - Columns: end_time (tz-aware), quantity (numeric), status in {in_progress, complete}
+    - Uses end_time of completed items as the production completion window
     """
     if production_log.empty:
         return 0.0
@@ -15,8 +15,11 @@ def compute_throughput(production_log: pd.DataFrame) -> float:
     produced = df[df["status"] == "complete"] if "status" in df.columns else df
     if produced.empty:
         return 0.0
-    t_min = produced["timestamp"].min()
-    t_max = produced["timestamp"].max()
+    # Use completion times to define the production window
+    if "end_time" not in produced.columns:
+        return 0.0
+    t_min = produced["end_time"].min()
+    t_max = produced["end_time"].max()
     total_time = t_max - t_min
     if pd.isna(t_min) or pd.isna(t_max) or total_time.total_seconds() <= 0:
         return 0.0
@@ -56,8 +59,11 @@ def compute_schedule_efficiency(
     completed = production_log[production_log["status"] == "complete"]
     if completed.empty:
         return 0.0
-    t_min = completed["timestamp"].min()
-    t_max = completed["timestamp"].max()
+    # Use completion times for actual elapsed window
+    if "end_time" not in completed.columns:
+        return 0.0
+    t_min = completed["end_time"].min()
+    t_max = completed["end_time"].max()
     total_actual_time = (t_max - t_min).total_seconds()
     if total_actual_time <= 0:
         return 0.0
