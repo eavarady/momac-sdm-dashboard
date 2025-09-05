@@ -84,30 +84,44 @@ else:
     st.dataframe(top3, use_container_width=True)
 
 
-
 # Gantt charts
 st.subheader("Gantt")
 chart = GanttChart()
 prod = _tables.get("production_log", pd.DataFrame())
 steps = _tables.get("process_steps", pd.DataFrame())
+products = _tables.get("products", pd.DataFrame())
 
-fig_actual = chart.actual_gantt(prod)
+# Optional name mappings
+product_names = None
+if not products.empty and {"product_id", "name"}.issubset(products.columns):
+    product_names = products[["product_id", "name"]].copy()
+
+step_names = None
+if not steps.empty and {"step_id", "step_name"}.issubset(steps.columns):
+    step_names = steps[["step_id", "step_name"]].drop_duplicates().copy()
+
+fig_actual = chart.actual_gantt(
+    prod,
+    product_names=product_names,
+    step_names=step_names,
+)
 if fig_actual is not None:
     st.plotly_chart(fig_actual, use_container_width=True)
 else:
     st.info("Actual Gantt unavailable (needs start_time/end_time in production_log).")
 
-fig_planned = chart.planned_gantt(steps)
+fig_planned = chart.planned_gantt(
+    steps,
+    production_log=prod,  # enables optional run-based anchoring if desired
+    product_names=product_names,
+)
 if fig_planned is not None:
     st.plotly_chart(fig_planned, use_container_width=True)
 else:
     st.info("Planned Gantt unavailable (needs process_steps with estimated_time).")
 
 
-
-
-
-# Data preview. 
+# Data preview.
 # NOTE: Let's keep this at the bottom as a footer when adding future data viz content.
 st.divider()
 with st.expander("Preview Data"):
