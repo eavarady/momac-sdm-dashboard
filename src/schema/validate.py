@@ -4,8 +4,14 @@ import pandas as pd
 from pydantic import BaseModel, ValidationError
 
 from schema.models import (
-    MachineRow, ProductionLineRow, ProductRow, OperatorRow,
-    ProcessStepRow, ProductionLogRow, MachineMetricRow, QualityCheckRow,
+    MachineRow,
+    ProductionLineRow,
+    ProductRow,
+    OperatorRow,
+    ProcessStepRow,
+    ProductionLogRow,
+    MachineMetricRow,
+    QualityCheckRow,
 )
 
 # Map logical table name -> (pydantic model, required columns for friendly messages)
@@ -14,12 +20,39 @@ TABLE_REGISTRY: Dict[str, Tuple[Type[BaseModel], Tuple[str, ...]]] = {
     "production_lines": (ProductionLineRow, ("line_id", "name", "shift")),
     "products": (ProductRow, ("product_id", "name", "category", "spec_version")),
     "operators": (OperatorRow, ("operator_id", "name", "role")),
-    "process_steps": (ProcessStepRow, ("product_id", "step_id", "step_name",
-                                       "assigned_machine", "assigned_operators",
-                                       "estimated_time", "dependency_step_id")),
-    "production_log": (ProductionLogRow, ("timestamp", "start_time", "end_time", "line_id", "product_id", "step_id", "quantity", "status")),
-    "machine_metrics": (MachineMetricRow, ("timestamp", "machine_id", "metric_type", "metric_value")),
-    "quality_checks": (QualityCheckRow, ("timestamp", "product_id", "check_type", "result", "inspector_id")),
+    "process_steps": (
+        ProcessStepRow,
+        (
+            "product_id",
+            "step_id",
+            "step_name",
+            "assigned_machine",
+            "assigned_operators",
+            "estimated_time",
+            "dependency_step_id",
+        ),
+    ),
+    "production_log": (
+        ProductionLogRow,
+        (
+            "timestamp",
+            "start_time",
+            "end_time",
+            "line_id",
+            "product_id",
+            "step_id",
+            "quantity",
+            "status",
+        ),
+    ),
+    "machine_metrics": (
+        MachineMetricRow,
+        ("timestamp", "machine_id", "metric_type", "metric_value"),
+    ),
+    "quality_checks": (
+        QualityCheckRow,
+        ("timestamp", "product_id", "check_type", "result", "inspector_id"),
+    ),
 }
 
 
@@ -70,7 +103,8 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
     errs: list[str] = []
 
     def dup_errors(df: pd.DataFrame, cols: list[str], label: str):
-        if not set(cols).issubset(df.columns): return
+        if not set(cols).issubset(df.columns):
+            return
         dups = df.duplicated(subset=cols, keep=False)
         if dups.any():
             bad = df.loc[dups, cols].astype(str).drop_duplicates()
@@ -79,40 +113,58 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
                 errs.append(f"DUP_KEY {label}: {key}")
 
     # Uniques
-    if "machines" in tables: dup_errors(tables["machines"], ["machine_id"], "machines.machine_id")
-    if "production_lines" in tables: dup_errors(tables["production_lines"], ["line_id"], "production_lines.line_id")
-    if "products" in tables: dup_errors(tables["products"], ["product_id"], "products.product_id")
-    if "operators" in tables: dup_errors(tables["operators"], ["operator_id"], "operators.operator_id")
-    if "process_steps" in tables: dup_errors(tables["process_steps"], ["product_id", "step_id"], "process_steps.(product_id,step_id)")
+    if "machines" in tables:
+        dup_errors(tables["machines"], ["machine_id"], "machines.machine_id")
+    if "production_lines" in tables:
+        dup_errors(tables["production_lines"], ["line_id"], "production_lines.line_id")
+    if "products" in tables:
+        dup_errors(tables["products"], ["product_id"], "products.product_id")
+    if "operators" in tables:
+        dup_errors(tables["operators"], ["operator_id"], "operators.operator_id")
+    if "process_steps" in tables:
+        dup_errors(
+            tables["process_steps"],
+            ["product_id", "step_id"],
+            "process_steps.(product_id,step_id)",
+        )
 
     # FKs
     if {"production_log", "process_steps"} <= tables.keys():
         steps_keys = set(
-            zip(tables["process_steps"]["product_id"].astype(str),
-                tables["process_steps"]["step_id"].astype(str))
+            zip(
+                tables["process_steps"]["product_id"].astype(str),
+                tables["process_steps"]["step_id"].astype(str),
+            )
         )
         for i, r in tables["production_log"].reset_index(drop=True).iterrows():
             key = (str(r.get("product_id", "")), str(r.get("step_id", "")))
             if key not in steps_keys:
-                errs.append(f"FK production_log row {i+1}: step not found in process_steps (product_id={key[0]!r}, step_id={key[1]!r})")
+                errs.append(
+                    f"FK production_log row {i+1}: step not found in process_steps (product_id={key[0]!r}, step_id={key[1]!r})"
+                )
 
     if {"machine_metrics", "machines"} <= tables.keys():
         mset = set(tables["machines"]["machine_id"].astype(str))
         for i, r in tables["machine_metrics"].reset_index(drop=True).iterrows():
             mid = str(r.get("machine_id", ""))
             if mid not in mset:
-                errs.append(f"FK machine_metrics row {i+1}: machine_id {mid!r} not found in machines")
+                errs.append(
+                    f"FK machine_metrics row {i+1}: machine_id {mid!r} not found in machines"
+                )
 
     if {"quality_checks", "products"} <= tables.keys():
         pset = set(tables["products"]["product_id"].astype(str))
         for i, r in tables["quality_checks"].reset_index(drop=True).iterrows():
             pid = str(r.get("product_id", ""))
             if pid not in pset:
-                errs.append(f"FK quality_checks row {i+1}: product_id {pid!r} not found in products")
+                errs.append(
+                    f"FK quality_checks row {i+1}: product_id {pid!r} not found in products"
+                )
 
     # Reuse workflow dependency validator if present
     try:
         from workflow.validator import steps_from_dataframe, validate_dependencies
+
         if "process_steps" in tables:
             steps = steps_from_dataframe(tables["process_steps"])
             dep_errs = validate_dependencies(steps)

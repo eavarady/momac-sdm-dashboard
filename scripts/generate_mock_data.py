@@ -3,7 +3,7 @@ Consolidated mock data generator (new schema only).
 
 Outputs CSVs under data/ with the enforced schema:
 - process_steps: estimated_time (hours)
-- production_log: columns [timestamp, line_id, product_id, step_id, quantity, status]
+- production_log: columns [timestamp, start_time, end_time, line_id, product_id, step_id, run_id, quantity, status]
   where status in {'in_progress','complete'} and timestamp is ISO 8601 Z
 - machine_metrics, quality_checks: timestamps ISO 8601 Z
 """
@@ -124,37 +124,43 @@ def generate_mock_data(
         return random.choice(["in_progress", "complete"])
 
     production_log_rows = []
+    # Create 1-3 runs per product to produce multiple instances per step
+    runs_per_product = {pid: random.randint(1, 3) for pid in products["product_id"]}
     for _, s in process_steps.iterrows():
-        # choose a start_time within window
-        start_iso = rand_ts_iso(start_date, end_date)
-        start_dt = datetime.strptime(start_iso, "%Y-%m-%dT%H:%M:%SZ")
-        status = rand_status()
-        qty = random.randint(1, 10)
-        # derive a rough duration around estimated_time (0.5x - 1.5x hours)
-        est_hours = float(s.get("estimated_time", 1) or 1)
-        jitter = random.uniform(0.5, 1.5)
-        dur_seconds = int(est_hours * jitter * 3600)
-        if status == "complete":
-            end_dt = start_dt + timedelta(seconds=dur_seconds)
-            end_iso = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-            # legacy timestamp = completion time for complete rows
-            ts_iso = end_iso
-        else:
-            end_iso = ""
-            # legacy timestamp = start time for in_progress rows
-            ts_iso = start_iso
-        production_log_rows.append(
-            {
-                "timestamp": ts_iso,
-                "start_time": start_iso,
-                "end_time": end_iso,
-                "line_id": random.choice(lines["line_id"]),
-                "product_id": s["product_id"],
-                "step_id": s["step_id"],
-                "quantity": qty,
-                "status": status,
-            }
-        )
+        pid = s["product_id"]
+        for run_idx in range(1, runs_per_product[pid] + 1):
+            run_id = f"{pid}-RUN-{run_idx}"
+            # choose a start_time within window
+            start_iso = rand_ts_iso(start_date, end_date)
+            start_dt = datetime.strptime(start_iso, "%Y-%m-%dT%H:%M:%SZ")
+            status = rand_status()
+            qty = random.randint(1, 10)
+            # derive a rough duration around estimated_time (0.5x - 1.5x hours)
+            est_hours = float(s.get("estimated_time", 1) or 1)
+            jitter = random.uniform(0.5, 1.5)
+            dur_seconds = int(est_hours * jitter * 3600)
+            if status == "complete":
+                end_dt = start_dt + timedelta(seconds=dur_seconds)
+                end_iso = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                # legacy timestamp = completion time for complete rows
+                ts_iso = end_iso
+            else:
+                end_iso = ""
+                # legacy timestamp = start time for in_progress rows
+                ts_iso = start_iso
+            production_log_rows.append(
+                {
+                    "timestamp": ts_iso,
+                    "start_time": start_iso,
+                    "end_time": end_iso,
+                    "line_id": random.choice(lines["line_id"]),
+                    "product_id": s["product_id"],
+                    "step_id": s["step_id"],
+                    "run_id": run_id,
+                    "quantity": qty,
+                    "status": status,
+                }
+            )
     production_log = pd.DataFrame(production_log_rows)
     production_log.to_csv(DATA / "production_log.csv", index=False)
 

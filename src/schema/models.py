@@ -159,6 +159,7 @@ class ProductionLogRow(_Row):
     line_id: str
     product_id: str
     step_id: str
+    run_id: Optional[str] = None
     quantity: int = Field(ge=0)
     status: Literal["in_progress", "complete"]
 
@@ -185,6 +186,14 @@ class ProductionLogRow(_Row):
     @classmethod
     def _strip(cls, v):
         return str(v).strip()
+
+    @field_validator("run_id", mode="before")
+    @classmethod
+    def _run_strip(cls, v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
 
     @field_validator("status", mode="before")
     @classmethod
