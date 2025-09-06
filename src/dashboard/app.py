@@ -54,7 +54,7 @@ except Exception as e:
 
 # KPIs
 kpis = compute_all_kpis(_tables)
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 # Show throughput per hour with one decimal
 
@@ -66,7 +66,7 @@ col3.metric(
 col4.metric("WIP (Qty)", f"{kpis.get('wip', 0)}")
 # schedule_efficiency displays as an index (e.g., 0.83x, 1.12x)
 col5.metric("Schedule Efficiency", f"{(kpis.get('schedule_efficiency') or 0.0):.2f}x")
-# col5.metric("On-Time Rate", f"{(kpis.get('on_time_rate') or 0.0)*100:.1f}%")
+col6.metric("On-Time Rate", f"{(kpis.get('on_time_rate') or 0.0)*100:.1f}%")
 
 # Bottleneck
 bn = detect_bottleneck(
