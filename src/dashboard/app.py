@@ -114,6 +114,7 @@ fig_planned = chart.planned_gantt(
     steps,
     production_log=prod,  # enables optional run-based anchoring if desired
     product_names=product_names,
+    anchor="run_start",  # anchor planned bars at earliest start_time per (product_id, run_id)
 )
 if fig_planned is not None:
     st.plotly_chart(fig_planned, use_container_width=True)
