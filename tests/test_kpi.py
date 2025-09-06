@@ -14,4 +14,4 @@ def test_kpis_basic():
     assert kpis["throughput"] == 5.0
     assert kpis["wip"] == 2
     assert kpis["schedule_efficiency"] == 0.0
-    # assert kpis["on_time_rate"] == pytest.approx(0.0)  # Not implemented yet
+    assert kpis["on_time_rate"] == pytest.approx(0.0)

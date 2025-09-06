@@ -161,6 +161,7 @@ class GanttChart:
                     .reset_index()
                 )
                 agg = agg.merge(names, on=["product_id", "step_id"], how="left")
+
             step_label = agg.get("step_name", agg.get("step_id")).astype(str)
             agg["task"] = agg["product_label"].astype(str) + " . " + step_label
             hover_cols = [
@@ -217,15 +218,14 @@ class GanttChart:
                 "name",
             }.issubset(product_names.columns):
                 df = df.merge(
-                    product_names[["product_id", "name"]].rename(
-                        columns={"name": "product_label"}
-                    ),
+                    product_names[["product_id", "name"]],
                     on="product_id",
                     how="left",
                 )
+                df = df.rename(columns={"name": "product_label"})
             elif isinstance(product_names, Mapping):
                 df["product_label"] = df["product_id"].map(
-                    lambda x: product_names.get(x, x)
+                    lambda x: product_names.get(x)
                 )
         df["product_label"] = df.get("product_label", pd.Series(dtype=object)).fillna(
             df["product_id"].astype(str)
