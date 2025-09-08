@@ -1,3 +1,23 @@
+### Excel (.xlsx)
+
+Prepare a workbook with one sheet per table name
+(`machines`, `production_lines`, `products`, `operators`, `process_steps`,
+`production_log`, `machine_metrics`, `quality_checks`).
+
+In the dashboard sidebar, choose **Excel** as the source and either:
+
+- Upload a `.xlsx` file, or
+- Enter a local path to a workbook.
+
+Optional:
+- Provide a JSON title map if your sheet names differ
+  (e.g. `{"production_log": "Prod Log"}`).
+- Specify how many header rows to skip (`skiprows`) if your data starts below
+  the first row.
+
+Validation and normalization are identical to CSV/Sheets.  
+Requires `openpyxl` (already in requirements).
+
 ## Google Sheets (OAuth, Desktop App)
 
 To read data from Google Sheets using OAuth (no service account required):
@@ -84,7 +104,7 @@ streamlit run src\dashboard\app.py
 
 ## Modules Overview
 
-- adapters: CSV/Google Sheets adapters for data sources.
+- adapters: CSV/Excel/Google Sheets adapters for data sources.
 - workflow: Workflow data model, step definitions, and validators.
 - kpi: KPI calculations (throughput, WIP, cycle time, on-time rate).
 - bottleneck: Simple bottleneck detection from logs and step estimates.
