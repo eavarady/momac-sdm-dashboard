@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 from adapters.csv_adapter import read_csv_tables, get_last_load_stats
 from adapters.sheets_adapter import read_sheets
+from adapters.excel_adapter import read_excel_tables as read_excel, get_last_load_stats as get_excel_stats
 from kpi.kpi_calculator import compute_all_kpis
 from sdm_bottlenecks.bottleneck_detector import detect_bottleneck, top_bottlenecks
 from visualizations.gantt import GanttChart
@@ -16,7 +17,8 @@ st.title("MOMAC SDM Dashboard")
 
 with st.sidebar:
     st.header("Data Source")
-    source = st.radio("Select source", ["CSV", "Google Sheets"], index=0)
+    source = st.radio("Select source", ["CSV", "Google Sheets", "Excel"], index=0)
+
     if source == "Google Sheets":
         st.caption("OAuth will prompt in your browser on first use.")
         spreadsheet_id = st.text_input("Spreadsheet ID", placeholder="1AbC...xyz")
@@ -29,10 +31,30 @@ with st.sidebar:
         if title_map_json.strip():
             try:
                 import json
-
                 title_map = json.loads(title_map_json)
             except Exception as je:
                 st.warning(f"Could not parse title map JSON: {je}")
+
+    elif source == "Excel":
+        st.caption("Upload a workbook or provide a path.")
+        uploaded = st.file_uploader("Upload .xlsx", type=["xlsx"])
+        excel_path = st.text_input("...or path to .xlsx", value="")
+        title_map_json = st.text_area(
+            'Optional: Title map JSON (e.g. {"production_log": "Prod Log"})',
+            value="",
+            height=80,
+        )
+        skiprows = st.number_input(
+            "Rows to skip at top of each sheet", min_value=0, value=0, step=1
+        )
+        title_map = None
+        if title_map_json.strip():
+            try:
+                import json
+                title_map = json.loads(title_map_json)
+            except Exception as je:
+                st.warning(f"Could not parse title map JSON: {je}")
+
     else:
         st.caption("Reading from local CSVs in data/")
 
@@ -40,14 +62,36 @@ with st.sidebar:
 try:
     if source == "CSV":
         _tables = read_csv_tables()
-    else:
+
+    elif source == "Google Sheets":
         if not spreadsheet_id:
+            st.info("Enter a Spreadsheet ID to load data.")
             st.stop()
         _tables = read_sheets(spreadsheet_id=spreadsheet_id, title_map=title_map)
+
+    else:  # Excel
+        if "uploaded" in locals() and uploaded is not None:
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                tmp.write(uploaded.getbuffer())
+                tmp_path = tmp.name
+            _tables = read_excel(tmp_path, title_map=title_map, skiprows=int(skiprows))
+        elif "excel_path" in locals() and excel_path.strip():
+            _tables = read_excel(excel_path.strip(), title_map=title_map, skiprows=int(skiprows))
+        else:
+            st.info("Upload an .xlsx file or provide a path to proceed.")
+            st.stop()
+
 except Exception as e:
     st.error(f"Data load failed: {e}")
+    # Per-source load stats for troubleshooting
     if source == "CSV":
         stats = get_last_load_stats()
+    elif source == "Excel":
+        stats = get_excel_stats()
+    else:
+        stats = {}  # (Sheets adapter can add a stats getter later if needed)
+    if stats:
         st.subheader("Last load stats")
         st.json(stats)
     st.stop()
