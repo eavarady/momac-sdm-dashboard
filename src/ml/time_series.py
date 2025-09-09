@@ -110,19 +110,27 @@ def aggregate_duration_series(
 
 
 def _infer_future_index(last_ds: pd.Timestamp, horizon: int, work_ds: pd.Series):
+    """Infer future timestamps using a robust date_range approach.
+
+    Avoids deprecated integer arithmetic with Timestamp by always using
+    pandas date_range when possible. Falls back to timedelta-based range only
+    when no frequency string can be inferred and we have a Timedelta.
+    """
     freq = pd.infer_freq(work_ds)
+    # If freq could not be inferred, derive median delta as Timedelta or default 1D
     if freq is None:
-        diffs = work_ds.diff().dropna()
+        diffs = work_ds.sort_values().diff().dropna()
         if not diffs.empty:
-            freq = diffs.median()  # Timedelta
+            delta = diffs.median()
         else:
-            freq = pd.Timedelta(days=1)
-    if isinstance(freq, pd.Timedelta):
-        future_ds = [last_ds + (i + 1) * freq for i in range(horizon)]
-    else:
-        future_idx = pd.date_range(start=last_ds, periods=horizon + 1, freq=freq)[1:]
-        future_ds = list(future_idx)
-    return future_ds
+            delta = pd.Timedelta(days=1)
+        # Use date_range with explicit freq=delta when possible (pandas >= 2 supports Timedelta freq)
+        future_idx = pd.date_range(start=last_ds + delta, periods=horizon, freq=delta)
+        return list(future_idx)
+
+    # freq is a string / DateOffset alias -> safe to build directly
+    future_idx = pd.date_range(start=last_ds, periods=horizon + 1, freq=freq)[1:]
+    return list(future_idx)
 
 
 def _baseline_forecast(
@@ -163,7 +171,7 @@ def _baseline_forecast(
 def time_series_forecast(
     df: pd.DataFrame,
     *,
-    horizon: int = 365,
+    horizon: int = 90,
     require_non_negative: bool = True,
     min_rows: int = 2,
     min_prophet_points: int = 20,
@@ -249,13 +257,7 @@ def time_series_forecast(
             f"Not enough rows for forecasting (have {len(work)}, need >= {min_rows})"
         )
 
-    # Pre-fit baseline decision
-    if len(work) < min_prophet_points:
-        forecast = _baseline_forecast(work, horizon, baseline_strategy)
-        forecast.to_csv(output_path, index=False)
-        return forecast
-
-    # Adaptive horizon reduction
+    # Adaptive horizon reduction (applied before baseline / prophet decision)
     if adapt_horizon:
         span_days = max(1, (work["ds"].max() - work["ds"].min()).days + 1)
         max_allowed = max(1, int(span_days * horizon_multiplier))
@@ -263,14 +265,29 @@ def time_series_forecast(
     else:
         effective_horizon = horizon
 
+    # Pre-fit baseline decision (use effective_horizon)
+    if len(work) < min_prophet_points:
+        forecast = _baseline_forecast(work, effective_horizon, baseline_strategy)
+        forecast.to_csv(output_path, index=False)
+        return forecast
+
     # Prophet training with failure fallback
     try:
         model = pf.Prophet()  # (Could simplify config later if needed)
         model.fit(work)
-        future = model.make_future_dataframe(periods=effective_horizon)
-        forecast = model.predict(future)
+
+        # Manually construct future dataframe to avoid internal deprecated Timestamp arithmetic
+        if effective_horizon > 0:
+            future_ds = _infer_future_index(
+                work["ds"].max(), effective_horizon, work["ds"]
+            )
+        else:
+            future_ds = []
+        future_full = pd.DataFrame({"ds": list(work["ds"]) + future_ds})
+
+        forecast = model.predict(future_full)
         forecast["model"] = "prophet"
-        # Merge original y for historical rows
+        # Merge original y for historical rows (future rows retain NaN y)
         forecast = forecast.merge(work[["ds", "y"]], on="ds", how="left")
     except Exception:
         if not fallback_on_failure:

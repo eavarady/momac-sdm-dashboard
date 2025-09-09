@@ -15,6 +15,7 @@ from ml.bottleneck_detector import detect_bottleneck, top_bottlenecks
 from visualizations.gantt import GanttChart
 from kpi.progress import per_step_progress, overall_progress_by_product
 from ml.time_series import time_series_forecast
+from visualizations.line_chart import build_forecast_line
 
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
@@ -144,18 +145,69 @@ else:
 st.subheader("Bottleneck Forecasting")
 st.write("Forecasting potential bottlenecks based on historical data.")
 
-# TIME SERIES FORECASTING (PROPHET)
-st.write("Time Series Forecasting")
-df = _tables.get("production_log", pd.DataFrame())
+with st.expander("Time Series Forecasting", expanded=True):
+    df = _tables.get("production_log", pd.DataFrame())
+    # Forecast settings
+    col_fs1, col_fs2, col_fs3 = st.columns(3)
+    with col_fs1:
+        user_horizon = st.number_input(
+            "Requested Horizon (periods)",
+            min_value=1,
+            max_value=720,
+            value=60,
+            step=1,
+            help="Number of future periods to forecast before adaptive reduction.",
+        )
+    with col_fs2:
+        adapt = st.checkbox(
+            "Adaptive Horizon",
+            value=True,
+            help="Reduce horizon based on history span * multiplier",
+        )
+        multiplier = st.number_input(
+            "Horizon Multiplier", min_value=0.1, max_value=10.0, value=1.0, step=0.1
+        )
+    with col_fs3:
+        baseline_strategy = st.selectbox(
+            "Baseline Strategy", ["mean", "linear"], index=0
+        )
 
-if df.empty:
-    st.info("No production_log data available for forecasting.")
-else:
-    try:
-        time_series_forecast(df)  # Handles validation & derivation internally
-        st.success("Forecast generated and saved to time_series_forecasted_data.csv")
-    except Exception as e:
-        st.error(f"Forecasting failed: {e}")
+    agg_freq = st.selectbox("Aggregation Frequency", ["D", "W", "M"], index=0)
+    agg_metric = st.selectbox(
+        "Aggregation Metric", ["mean", "median", "sum", "count"], index=0
+    )
+
+    if df.empty:
+        st.info("No production_log data available for forecasting.")
+    else:
+        run_btn = st.button("Run Forecast")
+        if run_btn:
+            try:
+                forecast_path = "time_series_forecasted_data.csv"
+                time_series_forecast(
+                    df,
+                    horizon=int(user_horizon),
+                    baseline_strategy=baseline_strategy,
+                    adapt_horizon=adapt,
+                    horizon_multiplier=float(multiplier),
+                    agg_freq=agg_freq,
+                    agg_metric=agg_metric,
+                )
+                # Attempt to load and plot
+                import os
+
+                if os.path.exists(forecast_path):
+                    fc = pd.read_csv(forecast_path, parse_dates=["ds"])
+                    # Derive effective horizon actually achieved (# future rows)
+                    future_rows = fc[fc["y"].isna()].shape[0]
+                    st.success(
+                        f"Forecast complete. Effective horizon: {future_rows} periods."
+                    )
+                    fig_fc = build_forecast_line(fc)
+                    st.plotly_chart(fig_fc, use_container_width=True)
+            except Exception as e:
+                st.error(f"Forecasting failed: {e}")
+
 # LINEAR REGRESSION-BASED FORECASTING (PLACEHOLDER)
 st.write("Regression-based forecasting (placeholder)")
 
