@@ -6,9 +6,12 @@ import streamlit as st
 import pandas as pd
 from adapters.csv_adapter import read_csv_tables, get_last_load_stats
 from adapters.sheets_adapter import read_sheets
-from adapters.excel_adapter import read_excel_tables as read_excel, get_last_load_stats as get_excel_stats
+from adapters.excel_adapter import (
+    read_excel_tables as read_excel,
+    get_last_load_stats as get_excel_stats,
+)
 from kpi.kpi_calculator import compute_all_kpis
-from sdm_bottlenecks.bottleneck_detector import detect_bottleneck, top_bottlenecks
+from ml.bottleneck_detector import detect_bottleneck, top_bottlenecks
 from visualizations.gantt import GanttChart
 from kpi.progress import per_step_progress, overall_progress_by_product
 
@@ -32,6 +35,7 @@ with st.sidebar:
         if title_map_json.strip():
             try:
                 import json
+
                 title_map = json.loads(title_map_json)
             except Exception as je:
                 st.warning(f"Could not parse title map JSON: {je}")
@@ -52,6 +56,7 @@ with st.sidebar:
         if title_map_json.strip():
             try:
                 import json
+
                 title_map = json.loads(title_map_json)
             except Exception as je:
                 st.warning(f"Could not parse title map JSON: {je}")
@@ -73,12 +78,15 @@ try:
     else:  # Excel
         if "uploaded" in locals() and uploaded is not None:
             import tempfile
+
             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
                 tmp.write(uploaded.getbuffer())
                 tmp_path = tmp.name
             _tables = read_excel(tmp_path, title_map=title_map, skiprows=int(skiprows))
         elif "excel_path" in locals() and excel_path.strip():
-            _tables = read_excel(excel_path.strip(), title_map=title_map, skiprows=int(skiprows))
+            _tables = read_excel(
+                excel_path.strip(), title_map=title_map, skiprows=int(skiprows)
+            )
         else:
             st.info("Upload an .xlsx file or provide a path to proceed.")
             st.stop()
@@ -203,4 +211,3 @@ with st.expander("Preview Data"):
     for name, df in _tables.items():
         st.markdown(f"### {name}")
         st.dataframe(df.head(20), width="stretch")
-
