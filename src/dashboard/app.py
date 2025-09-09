@@ -14,6 +14,7 @@ from kpi.kpi_calculator import compute_all_kpis
 from ml.bottleneck_detector import detect_bottleneck, top_bottlenecks
 from visualizations.gantt import GanttChart
 from kpi.progress import per_step_progress, overall_progress_by_product
+from ml.time_series import time_series_forecast
 
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
@@ -121,7 +122,10 @@ col4.metric("WIP (Qty)", f"{kpis.get('wip', 0)}")
 col5.metric("Schedule Efficiency", f"{(kpis.get('schedule_efficiency') or 0.0):.2f}x")
 col6.metric("On-Time Rate", f"{(kpis.get('on_time_rate') or 0.0)*100:.1f}%")
 
-# Bottleneck
+### BOTTLENECK DETECTION AND FORECASTING ###
+
+# HEURISTIC BOTTLENECK DETECTION
+
 bn = detect_bottleneck(
     _tables.get("process_steps", pd.DataFrame()),
     _tables.get("production_log", pd.DataFrame()),
@@ -135,6 +139,28 @@ if top3.empty:
     st.write("No in-progress work detected.")
 else:
     st.dataframe(top3, width="stretch")
+
+# BOTTLENECK FORECASTING HEADER
+st.subheader("Bottleneck Forecasting")
+st.write("Forecasting potential bottlenecks based on historical data.")
+
+# TIME SERIES FORECASTING (PROPHET)
+st.write("Time Series Forecasting")
+df = _tables.get("production_log", pd.DataFrame())
+
+if df.empty:
+    st.info("No production_log data available for forecasting.")
+else:
+    try:
+        time_series_forecast(df)  # Handles validation & derivation internally
+        st.success("Forecast generated and saved to time_series_forecasted_data.csv")
+    except Exception as e:
+        st.error(f"Forecasting failed: {e}")
+# LINEAR REGRESSION-BASED FORECASTING (PLACEHOLDER)
+st.write("Regression-based forecasting (placeholder)")
+
+# MULTIVARIATE REGRESSION FORECASTING (PLACEHOLDER)
+st.write("Multivariate regression forecasting (placeholder)")
 
 
 # Gantt charts
