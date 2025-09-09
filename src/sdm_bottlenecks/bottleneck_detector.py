@@ -42,12 +42,12 @@ def detect_bottleneck(
     # 4) Normalize status and filter to only in-progress rows
     #    - Lowercase so we tolerate "In_Progress", "IN_PROGRESS", etc.
     df["status"] = df["status"].astype(str).str.lower()
-    wip_rows = df[df["status"] == "in_progress"]
+    wip_rows = df[df["status"] == "in_progress"].copy()
     if wip_rows.empty:
         return None
 
     # 5) Normalize step_id to string for predictable grouping & tie-breaks
-    wip_rows["step_id"] = wip_rows["step_id"].astype(str)
+    wip_rows.loc[:, "step_id"] = wip_rows["step_id"].astype(str)
 
     # 6) Group by step_id and sum quantities to compute WIP per step
     wip_by_step = (
@@ -104,11 +104,11 @@ def top_bottlenecks(
 
     # Filter WIP
     df["status"] = df["status"].astype(str).str.lower()
-    wip = df[df["status"] == "in_progress"]
+    wip = df[df["status"] == "in_progress"].copy()
     if wip.empty:
         return pd.DataFrame(columns=["step_id", "total_wip"])
 
-    wip["step_id"] = wip["step_id"].astype(str)
+    wip.loc[:, "step_id"] = wip["step_id"].astype(str)
 
     # Aggregate and sort
     agg = (
