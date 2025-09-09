@@ -147,6 +147,22 @@ class ProcessStepRow(_Row):
         step_id = info.data.get("step_id", "")
         return step_id
 
+class ProductionTargetRow(_Row):
+    product_id: str = Field(min_length=1)
+    step_id: str = Field(min_length=1)
+    target_qty: int = Field(ge=0)
+
+    @field_validator("product_id", "step_id", mode="before")
+    @classmethod
+    def _strip(cls, v): return str(v).strip()
+
+    @field_validator("target_qty", mode="before")
+    @classmethod
+    def _to_int(cls, v):
+        try:
+            return max(0, int(float(v)))
+        except Exception:
+            return 0
 
 # ---- Fact tables ------------------------------------------------------------
 

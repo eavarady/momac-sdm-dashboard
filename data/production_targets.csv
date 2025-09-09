@@ -1,0 +1,4 @@
+product_id,step_id,target_qty
+PRD-1,PRD-1-STEP-1,10
+PRD-1,PRD-1-STEP-2,8
+PRD-2,PRD-2-STEP-1,12

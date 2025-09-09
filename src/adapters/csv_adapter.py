@@ -59,6 +59,7 @@ def read_csv_tables() -> Dict[str, pd.DataFrame]:
         "production_log",
         "machine_metrics",
         "quality_checks",
+        "production_targets",
     ]:
         path = DATA_DIR / f"{name}.csv"
         if path.exists():
@@ -92,6 +93,9 @@ def read_csv_tables() -> Dict[str, pd.DataFrame]:
                     df = _normalize_dimension_table(
                         df, ["operator_id", "name", "role"], pk="operator_id"
                     )
+                elif name == "production_targets":
+                    df = validate_dataframe(raw, "production_targets")
+                
                 rows_valid = len(df)
                 _LAST_LOAD_STATS[name] = {
                     "rows_read": rows_read,

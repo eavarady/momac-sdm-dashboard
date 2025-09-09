@@ -12,6 +12,7 @@ from schema.models import (
     ProductionLogRow,
     MachineMetricRow,
     QualityCheckRow,
+    ProductionTargetRow,
 )
 
 # Map logical table name -> (pydantic model, required columns for friendly messages)
@@ -53,6 +54,7 @@ TABLE_REGISTRY: Dict[str, Tuple[Type[BaseModel], Tuple[str, ...]]] = {
         QualityCheckRow,
         ("timestamp", "product_id", "check_type", "result", "inspector_id"),
     ),
+    "production_targets": (ProductionTargetRow, ("product_id", "step_id", "target_qty")),
 }
 
 

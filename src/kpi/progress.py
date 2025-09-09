@@ -17,6 +17,7 @@ def _normalize_status_col(df: pd.DataFrame) -> pd.DataFrame:
 def per_step_progress(
     process_steps: pd.DataFrame,
     production_log: pd.DataFrame,
+    targets: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Compute per-step progress as quantity-complete / (quantity-complete + quantity-in_progress).
@@ -75,12 +76,29 @@ def per_step_progress(
     nonzero = denom > 0
     merged.loc[nonzero, "progress"] = (merged.loc[nonzero, "complete_qty"] / denom.loc[nonzero]).clip(0, 1)
 
+    # If targets provided, override per-step progress where a positive target exists
+    if targets is not None and not targets.empty:
+        t = targets[["product_id", "step_id", "target_qty"]].copy()
+        t["target_qty"] = pd.to_numeric(t["target_qty"], errors="coerce").fillna(0)
+        merged = merged.merge(t, on=["product_id", "step_id"], how="left")
+
+        has_target = merged["target_qty"].fillna(0) > 0
+        merged.loc[has_target, "progress"] = (
+            merged.loc[has_target, "complete_qty"] / merged.loc[has_target, "target_qty"]
+        ).clip(0, 1)
+
     # Order columns nicely
     ordered_cols = ["product_id", "step_id"]
     if "step_name" in merged.columns:
         ordered_cols.append("step_name")
-    ordered_cols += ["complete_qty", "in_progress_qty", "progress"]
-    return merged.loc[:, ordered_cols]
+    # If target_qty is present, show it before progress
+    cols_tail = ["complete_qty", "in_progress_qty"]
+    if "target_qty" in merged.columns:
+        cols_tail.append("target_qty")
+    cols_tail.append("progress")
+    ordered_cols += cols_tail
+
+    return merged.loc[:, [c for c in ordered_cols if c in merged.columns]]
 
 
 def overall_progress_by_product(step_progress: pd.DataFrame) -> pd.DataFrame:
