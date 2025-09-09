@@ -10,6 +10,7 @@ from adapters.excel_adapter import read_excel_tables as read_excel, get_last_loa
 from kpi.kpi_calculator import compute_all_kpis
 from sdm_bottlenecks.bottleneck_detector import detect_bottleneck, top_bottlenecks
 from visualizations.gantt import GanttChart
+from kpi.progress import per_step_progress, overall_progress_by_product
 
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
@@ -125,7 +126,7 @@ top3 = top_bottlenecks(prod, top_n=3)
 if top3.empty:
     st.write("No in-progress work detected.")
 else:
-    st.dataframe(top3, use_container_width=True)
+    st.dataframe(top3, width="stretch")
 
 
 # Gantt charts
@@ -134,6 +135,7 @@ chart = GanttChart()
 prod = _tables.get("production_log", pd.DataFrame())
 steps = _tables.get("process_steps", pd.DataFrame())
 products = _tables.get("products", pd.DataFrame())
+targets = _tables.get("production_targets", pd.DataFrame())
 
 # Optional name mappings
 product_names = None
@@ -150,7 +152,7 @@ fig_actual = chart.actual_gantt(
     step_names=step_names,
 )
 if fig_actual is not None:
-    st.plotly_chart(fig_actual, use_container_width=True)
+    st.plotly_chart(fig_actual, width="stretch")
 else:
     st.info("Actual Gantt unavailable (needs start_time/end_time in production_log).")
 
@@ -161,10 +163,38 @@ fig_planned = chart.planned_gantt(
     anchor="run_start",  # anchor planned bars at earliest start_time per (product_id, run_id)
 )
 if fig_planned is not None:
-    st.plotly_chart(fig_planned, use_container_width=True)
+    st.plotly_chart(fig_planned, width="stretch")
 else:
     st.info("Planned Gantt unavailable (needs process_steps with estimated_time).")
 
+
+sp = per_step_progress(steps, prod, targets=targets if not targets.empty else None)
+overall = overall_progress_by_product(sp)
+
+st.subheader("Progress")
+
+# Overall progress per product
+if not overall.empty:
+    for _, row in overall.sort_values("product_id").iterrows():
+        pct = float(row["overall_progress"])
+        st.write(f"**{row['product_id']}** — {pct:.0%}")
+        st.progress(max(0.0, min(1.0, pct)))
+else:
+    st.info("No overall progress available (check data or filters).")
+
+# Per-step table (shows target_qty when present)
+if not sp.empty:
+    disp = sp.copy()
+    disp["progress_pct"] = (disp["progress"] * 100).round(1)
+    cols = ["product_id", "step_id"]
+    if "step_name" in disp.columns:
+        cols.append("step_name")
+    if "target_qty" in disp.columns:
+        cols.append("target_qty")
+    cols += ["complete_qty", "in_progress_qty", "progress_pct"]
+    st.dataframe(disp[cols], width="stretch")
+else:
+    st.info("No step-level progress available.")
 
 # Data preview.
 # NOTE: Let's keep this at the bottom as a footer when adding future data viz content.
@@ -172,4 +202,5 @@ st.divider()
 with st.expander("Preview Data"):
     for name, df in _tables.items():
         st.markdown(f"### {name}")
-        st.dataframe(df.head(20))
+        st.dataframe(df.head(20), width="stretch")
+
