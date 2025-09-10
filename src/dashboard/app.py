@@ -16,6 +16,7 @@ from visualizations.gantt import GanttChart
 from kpi.progress import per_step_progress, overall_progress_by_product
 from ml.time_series import time_series_forecast
 from visualizations.line_chart import build_forecast_line
+from ml.linear_forecast import linear_forecast
 
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
@@ -209,7 +210,62 @@ with st.expander("Time Series Forecasting", expanded=True):
                 st.error(f"Forecasting failed: {e}")
 
 # LINEAR REGRESSION-BASED FORECASTING (PLACEHOLDER)
-st.write("Regression-based forecasting (placeholder)")
+with st.expander("Regression-based forecasting (placeholder)", expanded=False):
+    df_lr = _tables.get("production_log", pd.DataFrame())
+
+    # Same basic controls for consistency
+    col_lr1, col_lr2 = st.columns(2)
+    with col_lr1:
+        lr_horizon = st.number_input(
+            "Requested Horizon (periods)",
+            min_value=1,
+            max_value=720,
+            value=60,
+            step=1,
+        )
+        lr_agg_freq = st.selectbox("Aggregation Frequency", ["D", "W", "M"], index=0, key="lr_freq")
+    with col_lr2:
+        lr_adapt = st.checkbox("Adaptive Horizon", value=True, key="lr_adapt")
+        lr_multiplier = st.number_input(
+            "Horizon Multiplier", min_value=0.1, max_value=10.0, value=1.0, step=0.1, key="lr_mult"
+        )
+        lr_agg_metric = st.selectbox(
+            "Aggregation Metric",
+            ["mean", "median", "sum", "count"],
+            index=0,
+            key="lr_metric",
+        )
+
+    if df_lr.empty:
+        st.info("No production_log data available for regression-based forecasting.")
+    else:
+        run_lr = st.button("Run Linear Forecast")
+        if run_lr:
+            try:
+                lr_path = "time_series_forecasted_data.csv"  # reuse the same path pattern for now
+                linear_forecast(
+                    df_lr,
+                    horizon=int(lr_horizon),
+                    adapt_horizon=lr_adapt,
+                    horizon_multiplier=float(lr_multiplier),
+                    agg_freq=lr_agg_freq,
+                    agg_metric=lr_agg_metric,
+                )
+                import os
+                if os.path.exists(lr_path):
+                    fc_lr = pd.read_csv(lr_path, parse_dates=["ds"])
+                    future_rows_lr = fc_lr[fc_lr["y"].isna()].shape[0]
+                    st.success(
+                        f"Linear forecast complete (placeholder). Effective horizon: {future_rows_lr} periods."
+                    )
+                    fig_lr = build_forecast_line(fc_lr)
+                    st.plotly_chart(fig_lr, use_container_width=True)
+                st.caption(
+                    "Note: placeholder model holds the last observed value into the future. "
+                    "A proper regression fit is coming soon."
+                )
+            except Exception as e:
+                st.error(f"Linear forecasting failed: {e}")
 
 # MULTIVARIATE REGRESSION FORECASTING (PLACEHOLDER)
 st.write("Multivariate regression forecasting (placeholder)")
