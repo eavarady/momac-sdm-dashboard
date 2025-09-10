@@ -1,136 +1,11 @@
 from adapters import csv_adapter as adapter  # placeholder (not yet used)
 import pandas as pd
 import prophet as pf
-
-
-def aggregate_duration_series(
-    df: pd.DataFrame,
-    *,
-    freq: str = "D",
-    metric: str = "mean",
-    status_complete_values: tuple[str, ...] = ("complete",),
-    require_positive: bool = True,
-    min_points: int = 1,
-) -> pd.DataFrame:
-    """
-    Aggregate completed run durations into a regular time series.
-
-    Inputs:
-      df: DataFrame with at least start_time, end_time. Optional 'status'.
-      freq: Resample frequency (e.g. 'D' for daily, 'W' for weekly).
-      metric: One of {'mean','median','sum','count'} to define y.
-      status_complete_values: If 'status' column exists, keep only these values.
-      require_positive: Drop non-positive durations (guard against inverted times).
-      min_points: Minimum raw completed rows required before aggregation.
-
-    Returns:
-      DataFrame with columns:
-        ds: period timestamp (period start)
-        y: aggregated metric
-
-    Notes:
-      - Timestamps are normalized to naive UTC (Prophet requirement).
-      - For 'count', y = number of completed runs per period.
-      - For other metrics, durations are in hours.
-    """
-    required = {"start_time", "end_time"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {missing}")
-
-    work = df[list(required) + (["status"] if "status" in df.columns else [])].copy()
-
-    # Parse datetimes (force UTC awareness, then strip later)
-    for col in ("start_time", "end_time"):
-        work[col] = pd.to_datetime(work[col], errors="coerce", utc=True)
-
-    work = work.dropna(subset=["start_time", "end_time"])
-    if "status" in work.columns:
-        work = work[work["status"].isin(status_complete_values)]
-
-    if work.empty:
-        raise ValueError("No completed rows after filtering & datetime parsing")
-
-    # Compute duration (hours)
-    work["duration_h"] = (
-        work["end_time"] - work["start_time"]
-    ).dt.total_seconds() / 3600.0
-
-    if require_positive:
-        work = work[work["duration_h"] > 0]
-
-    if len(work) < min_points:
-        raise ValueError(
-            f"Insufficient completed rows for aggregation (have {len(work)}, need >= {min_points})"
-        )
-
-    # Choose aggregation target
-    agg_map: dict[str, str] = {
-        "mean": "mean",
-        "median": "median",
-        "sum": "sum",
-        "count": "count",
-    }
-    if metric not in agg_map:
-        raise ValueError(f"Unsupported metric '{metric}'. Choose from {list(agg_map)}")
-
-    # Build a base series with end_time as event timestamp
-    events = work[["end_time", "duration_h"]].rename(columns={"end_time": "timestamp"})
-
-    # Resample
-    events = events.set_index("timestamp").sort_index()
-
-    # For count, ignore duration values
-    if metric == "count":
-        agg_series = events["duration_h"].resample(freq).count()
-    else:
-        agg_series = getattr(events["duration_h"].resample(freq), agg_map[metric])()
-
-    # Drop empty periods (NaN)
-    agg_series = agg_series.dropna()
-
-    if agg_series.empty:
-        raise ValueError("Aggregation produced an empty series")
-
-    # Prepare output DataFrame; convert index to naive UTC timestamps
-    ds = agg_series.index
-    if getattr(ds, "tz", None) is not None:
-        ds = ds.tz_convert("UTC").tz_localize(None)
-
-    out = pd.DataFrame({"ds": ds, "y": agg_series.values})
-
-    # Enforce numeric y
-    out["y"] = pd.to_numeric(out["y"], errors="coerce")
-    out = out.dropna(subset=["y"])
-
-    if out.empty:
-        raise ValueError("Resulting aggregated series is empty after numeric coercion")
-
-    return out
-
-
-def _infer_future_index(last_ds: pd.Timestamp, horizon: int, work_ds: pd.Series):
-    """Infer future timestamps using a robust date_range approach.
-
-    Avoids deprecated integer arithmetic with Timestamp by always using
-    pandas date_range when possible. Falls back to timedelta-based range only
-    when no frequency string can be inferred and we have a Timedelta.
-    """
-    freq = pd.infer_freq(work_ds)
-    # If freq could not be inferred, derive median delta as Timedelta or default 1D
-    if freq is None:
-        diffs = work_ds.sort_values().diff().dropna()
-        if not diffs.empty:
-            delta = diffs.median()
-        else:
-            delta = pd.Timedelta(days=1)
-        # Use date_range with explicit freq=delta when possible (pandas >= 2 supports Timedelta freq)
-        future_idx = pd.date_range(start=last_ds + delta, periods=horizon, freq=delta)
-        return list(future_idx)
-
-    # freq is a string / DateOffset alias -> safe to build directly
-    future_idx = pd.date_range(start=last_ds, periods=horizon + 1, freq=freq)[1:]
-    return list(future_idx)
+from .ts_utils import (
+    aggregate_duration_series,
+    _infer_future_index,
+    build_forecast_frame,
+)
 
 
 def _baseline_forecast(
@@ -156,15 +31,8 @@ def _baseline_forecast(
         label = "baseline-linear"
     combined_ds = list(work["ds"]) + future_ds
     combined_yhat = hist_pred + future_pred
-    forecast = pd.DataFrame(
-        {
-            "ds": combined_ds,
-            "yhat": combined_yhat,
-            "yhat_lower": combined_yhat,
-            "yhat_upper": combined_yhat,
-            "model": label,
-        }
-    ).merge(work[["ds", "y"]], on="ds", how="left")
+    forecast = build_forecast_frame(combined_ds, combined_yhat, model_label=label)
+    forecast = forecast.merge(work[["ds", "y"]], on="ds", how="left")
     return forecast
 
 
@@ -278,9 +146,7 @@ def time_series_forecast(
 
         # Manually construct future dataframe to avoid internal deprecated Timestamp arithmetic
         if effective_horizon > 0:
-            future_ds = _infer_future_index(
-                work["ds"].max(), effective_horizon, work["ds"]
-            )
+            future_ds = _infer_future_index(work["ds"].max(), effective_horizon, work["ds"])
         else:
             future_ds = []
         future_full = pd.DataFrame({"ds": list(work["ds"]) + future_ds})
