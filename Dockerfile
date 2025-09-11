@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
-# Use an official Python runtime as a parent image
-FROM python:3.9-slim
+# Use an official Python runtime as a parent image (3.11 supports PEP 604 union types "|")
+FROM python:3.11-slim
 
 # Ensure output is not buffered and set default port
 ENV PYTHONUNBUFFERED=1 \
