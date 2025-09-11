@@ -209,8 +209,8 @@ with st.expander("Time Series Forecasting", expanded=True):
             except Exception as e:
                 st.error(f"Forecasting failed: {e}")
 
-# LINEAR REGRESSION-BASED FORECASTING (PLACEHOLDER)
-with st.expander("Regression-based forecasting (placeholder)", expanded=False):
+# LINEAR REGRESSION-BASED FORECASTING
+with st.expander("Regression-based forecasting", expanded=False):
     df_lr = _tables.get("production_log", pd.DataFrame())
 
     # Same basic controls for consistency
@@ -256,14 +256,11 @@ with st.expander("Regression-based forecasting (placeholder)", expanded=False):
                     fc_lr = pd.read_csv(lr_path, parse_dates=["ds"])
                     future_rows_lr = fc_lr[fc_lr["y"].isna()].shape[0]
                     st.success(
-                        f"Linear forecast complete (placeholder). Effective horizon: {future_rows_lr} periods."
+                        f"Linear forecast complete. Effective horizon: {future_rows_lr} periods."
                     )
                     fig_lr = build_forecast_line(fc_lr)
                     st.plotly_chart(fig_lr, use_container_width=True)
-                st.caption(
-                    "Note: placeholder model holds the last observed value into the future. "
-                    "A proper regression fit is coming soon."
-                )
+                
             except Exception as e:
                 st.error(f"Linear forecasting failed: {e}")
 

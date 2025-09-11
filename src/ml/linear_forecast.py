@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Optional
+import numpy as np
 import pandas as pd
+from sklearn.linear_model import LinearRegression
 
 from .ts_utils import (
     aggregate_duration_series as _agg_series,
@@ -23,12 +24,18 @@ def linear_forecast(
     horizon_multiplier: float = 1.0,
     output_path: str = "time_series_forecasted_data.csv",
 ) -> pd.DataFrame:
-    """Placeholder linear model forecast.
-
-    Currently: echoes historical y as yhat and holds last value for future.
-    TODO: Replace with actual linear regression fit/predict (e.g., Ordinary
-    Least Squares on index vs y) retaining identical output schema.
     """
+    Linear regression forecast using sklearn (y ~ a + b * t).
+
+    Inputs:
+      - Either (ds, y) series OR raw logs with (start_time, end_time), which will be
+        aggregated to (ds, y) using the same ts_utils helpers as Prophet.
+
+    Output:
+      - A DataFrame with columns: ds, yhat, yhat_lower, yhat_upper, model, (and y for history),
+        written to `output_path` for the dashboard to consume.
+    """
+    # prep to (ds, y)
     if {"ds", "y"}.issubset(df.columns):
         work = df[["ds", "y"]].copy()
         work["ds"] = pd.to_datetime(work["ds"], errors="coerce", utc=True)
@@ -41,21 +48,32 @@ def linear_forecast(
             raw["start_time"] = pd.to_datetime(raw["start_time"], errors="coerce", utc=True)
             raw["end_time"] = pd.to_datetime(raw["end_time"], errors="coerce", utc=True)
             raw = raw.dropna(subset=["start_time", "end_time"])
+            if raw.empty:
+                raise ValueError("No valid (start_time, end_time) rows after parsing datetimes")
             durations = (raw["end_time"] - raw["start_time"]).dt.total_seconds() / 3600.0
             work = pd.DataFrame({"ds": raw["end_time"], "y": durations})
     else:
         raise ValueError("DataFrame must contain either ('ds','y') or ('start_time','end_time') columns")
 
-    work = work.dropna(subset=["ds", "y"])
-    work["y"] = pd.to_numeric(work["y"], errors="coerce")
-    work = work.dropna(subset=["y"]).sort_values("ds").drop_duplicates(subset=["ds"])
+    # clean & sort
+    work = (
+        work.dropna(subset=["ds", "y"])
+            .assign(y=lambda d: pd.to_numeric(d["y"], errors="coerce"))
+            .dropna(subset=["y"])
+            .sort_values("ds")
+            .drop_duplicates(subset=["ds"])
+    )
+    # strip timezone for sklearn / plotting consistency
     if getattr(work["ds"].dt, "tz", None) is not None:
         work["ds"] = work["ds"].dt.tz_convert("UTC").dt.tz_localize(None)
+
     if require_non_negative:
         work = work[work["y"] >= 0]
+
     if len(work) < min_rows:
         raise ValueError(f"Not enough rows for forecasting (have {len(work)}, need >= {min_rows})")
 
+    # effective horizon (same rule as Prophet path)
     if adapt_horizon:
         span_days = max(1, (work["ds"].max() - work["ds"].min()).days + 1)
         max_allowed = max(1, int(span_days * horizon_multiplier))
@@ -63,17 +81,56 @@ def linear_forecast(
     else:
         effective_horizon = horizon
 
-    future_ds = _infer_idx(work["ds"].max(), effective_horizon, work["ds"]) if effective_horizon > 0 else []
+    # fit OLS on time index
+    n = len(work)
+    t_hist = np.arange(n, dtype=float).reshape(-1, 1)
+    y_hist = work["y"].to_numpy(dtype=float)
 
-    # Placeholder "model": flat hold of last value into future
-    last_val = float(work["y"].iloc[-1])
-    hist_yhat = list(work["y"].astype(float))
-    future_yhat = [last_val] * effective_horizon
-    combined_ds = list(work["ds"]) + future_ds
-    combined_yhat = hist_yhat + future_yhat
+    model = LinearRegression()
+    model.fit(t_hist, y_hist)
 
-    forecast = build_forecast_frame(combined_ds, combined_yhat, model_label="linear-placeholder")
-    # Merge historical y
-    forecast = forecast.merge(work[["ds", "y"]], on="ds", how="left")
+    # predict for history (smooth fitted line) and future (extrapolation)
+    hist_yhat = model.predict(t_hist).astype(float)
+
+    if effective_horizon > 0:
+        future_ds = _infer_idx(work["ds"].max(), effective_horizon, work["ds"])
+        t_fut = np.arange(n, n + effective_horizon, dtype=float).reshape(-1, 1)
+        future_yhat = model.predict(t_fut).astype(float)
+    else:
+        future_ds = []
+        future_yhat = np.array([], dtype=float)
+
+    # simple uncertainty bands from residual stddev (homoskedastic assumption)
+    if n > 2:
+        resid = y_hist - hist_yhat
+        sigma = float(resid.std(ddof=1))
+    else:
+        sigma = 0.0
+
+    # concatenate series
+    combined_ds = list(work["ds"]) + list(future_ds)
+    combined_yhat = np.concatenate([hist_yhat, future_yhat])
+    if require_non_negative:
+        combined_yhat = np.clip(combined_yhat, 0.0, None)
+
+    # 95% pseudo-intervals (constant sigma)
+    if sigma > 0:
+        intervals = {
+            "yhat_lower": combined_yhat - 1.96 * sigma,
+            "yhat_upper": combined_yhat + 1.96 * sigma,
+        }
+        if require_non_negative:
+            intervals["yhat_lower"] = np.clip(intervals["yhat_lower"], 0.0, None)
+    else:
+        intervals = {"yhat_lower": combined_yhat, "yhat_upper": combined_yhat}
+
+    # build standardized forecast frame and merge historic y
+    forecast = build_forecast_frame(
+        combined_ds,
+        combined_yhat,
+        model_label="linear-regression",
+        intervals=intervals,
+    ).merge(work[["ds", "y"]], on="ds", how="left")
+
     forecast.to_csv(output_path, index=False)
     return forecast
