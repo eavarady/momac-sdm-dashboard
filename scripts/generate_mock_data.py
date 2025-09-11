@@ -33,6 +33,8 @@ def generate_mock_data(
     start_date: datetime | None = None,
     end_date: datetime | None = None,
     seed: int | None = 42,
+    runs_min: int = 6,  # keep higher run counts
+    runs_max: int = 12,  # keep higher run counts
 ):
     if seed is not None:
         random.seed(seed)
@@ -121,11 +123,14 @@ def generate_mock_data(
 
     # Production Log (add start_time/end_time; keep legacy timestamp for compatibility)
     def rand_status() -> str:
-        return random.choice(["in_progress", "complete"])
+        # Unbiased 50/50 selection
+        return random.choice(["complete", "in_progress"])
 
     production_log_rows = []
-    # Create 1-3 runs per product to produce multiple instances per step
-    runs_per_product = {pid: random.randint(1, 3) for pid in products["product_id"]}
+    # Increase runs per product (previously 1–3)
+    runs_per_product = {
+        pid: random.randint(runs_min, runs_max) for pid in products["product_id"]
+    }
     for _, s in process_steps.iterrows():
         pid = s["product_id"]
         for run_idx in range(1, runs_per_product[pid] + 1):
@@ -199,4 +204,7 @@ def generate_mock_data(
 
 
 if __name__ == "__main__":
-    generate_mock_data()
+    generate_mock_data(
+        runs_min=6,
+        runs_max=12,
+    )
