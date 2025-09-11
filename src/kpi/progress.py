@@ -1,6 +1,7 @@
 from __future__ import annotations
 import pandas as pd
 
+
 def _normalize_status_col(df: pd.DataFrame) -> pd.DataFrame:
     if "status" not in df.columns:
         return df
@@ -14,6 +15,7 @@ def _normalize_status_col(df: pd.DataFrame) -> pd.DataFrame:
     )
     return out
 
+
 def per_step_progress(
     process_steps: pd.DataFrame,
     production_log: pd.DataFrame,
@@ -26,11 +28,15 @@ def per_step_progress(
       product_id, step_id[, step_name], complete_qty, in_progress_qty, progress (0..1)
     """
     # Base universe of steps (so steps with no activity still appear as 0%)
-    cols = ["product_id", "step_id"] + (["step_name"] if "step_name" in process_steps.columns else [])
+    cols = ["product_id", "step_id"] + (
+        ["step_name"] if "step_name" in process_steps.columns else []
+    )
     base = process_steps.loc[:, cols].drop_duplicates().copy()
     if base.empty:
         # Nothing to compute
-        return pd.DataFrame(columns=cols + ["complete_qty", "in_progress_qty", "progress"])
+        return pd.DataFrame(
+            columns=cols + ["complete_qty", "in_progress_qty", "progress"]
+        )
 
     # Aggregate production log by status
     log = production_log.copy()
@@ -59,7 +65,9 @@ def per_step_progress(
         for col in ("complete", "in_progress"):
             if col not in pivot.columns:
                 pivot[col] = 0
-        pivot = pivot.rename(columns={"complete": "complete_qty", "in_progress": "in_progress_qty"})
+        pivot = pivot.rename(
+            columns={"complete": "complete_qty", "in_progress": "in_progress_qty"}
+        )
     else:
         # No log -> zeros for all steps
         pivot = base[["product_id", "step_id"]].copy()
@@ -74,7 +82,9 @@ def per_step_progress(
     denom = merged["complete_qty"] + merged["in_progress_qty"]
     merged["progress"] = 0.0
     nonzero = denom > 0
-    merged.loc[nonzero, "progress"] = (merged.loc[nonzero, "complete_qty"] / denom.loc[nonzero]).clip(0, 1)
+    merged.loc[nonzero, "progress"] = (
+        merged.loc[nonzero, "complete_qty"] / denom.loc[nonzero]
+    ).clip(0, 1)
 
     # If targets provided, override per-step progress where a positive target exists
     if targets is not None and not targets.empty:
@@ -84,7 +94,8 @@ def per_step_progress(
 
         has_target = merged["target_qty"].fillna(0) > 0
         merged.loc[has_target, "progress"] = (
-            merged.loc[has_target, "complete_qty"] / merged.loc[has_target, "target_qty"]
+            merged.loc[has_target, "complete_qty"]
+            / merged.loc[has_target, "target_qty"]
         ).clip(0, 1)
 
     # Order columns nicely
@@ -118,11 +129,11 @@ def overall_progress_by_product(step_progress: pd.DataFrame) -> pd.DataFrame:
     if step_progress.empty:
         return pd.DataFrame(columns=["product_id", "overall_progress"])
 
-    grp = (
-        step_progress.groupby("product_id", as_index=False)["progress"]
-        .mean()
-        .clip(lower=0.0, upper=1.0)
-        .rename(columns={"progress": "overall_progress"})
-    )
+    # Compute mean progress per product
+    grp = step_progress.groupby("product_id", as_index=False)["progress"].mean()
+    # Ensure numeric and clip only the progress column (not the whole DataFrame)
+    grp["progress"] = pd.to_numeric(grp["progress"], errors="coerce").fillna(0.0)
+    grp["progress"] = grp["progress"].clip(lower=0.0, upper=1.0)
+    grp = grp.rename(columns={"progress": "overall_progress"})
 
     return grp[["product_id", "overall_progress"]]
