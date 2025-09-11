@@ -103,14 +103,26 @@ def per_step_progress(
 
 def overall_progress_by_product(step_progress: pd.DataFrame) -> pd.DataFrame:
     """
-    Average per-step progress across all steps of each product (steps with no activity count as 0%).
-    Returns: DataFrame with columns [product_id, overall_progress]
+    Average per-step progress across all steps of each product.
+    Contract: Always returns DataFrame with columns [product_id, overall_progress].
+    - Empty input -> empty DataFrame with those columns.
+    - Missing 'progress' column -> raises ValueError (fast fail).
+    - Progress values clipped into [0.0, 1.0].
     """
+    required_cols = {"product_id", "progress"}
+    if not required_cols.issubset(step_progress.columns):
+        raise ValueError(
+            f"overall_progress_by_product: missing required columns {required_cols - set(step_progress.columns)}"
+        )
+
     if step_progress.empty:
         return pd.DataFrame(columns=["product_id", "overall_progress"])
+
     grp = (
         step_progress.groupby("product_id", as_index=False)["progress"]
         .mean()
+        .clip(lower=0.0, upper=1.0)
         .rename(columns={"progress": "overall_progress"})
     )
-    return grp
+
+    return grp[["product_id", "overall_progress"]]

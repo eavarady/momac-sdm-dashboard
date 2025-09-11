@@ -22,7 +22,7 @@ def linear_forecast(
     agg_metric: str = "mean",
     adapt_horizon: bool = True,
     horizon_multiplier: float = 1.0,
-    output_path: str = "time_series_forecasted_data.csv",
+    output_path: str = "linear_forecasted_data.csv",
 ) -> pd.DataFrame:
     """
     Linear regression forecast using sklearn (y ~ a + b * t).

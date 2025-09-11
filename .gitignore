@@ -15,3 +15,10 @@ __pycache__/
 
 # VSCode
 .vscode/
+
+# macOS system
+.DS_Store
+
+# Forecast-produced tables
+linear_forecasted_data.csv
+time_series_forecasted_data.csv
