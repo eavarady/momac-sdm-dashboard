@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+
+# Build/test
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+tests/
+
+# Notebooks and data caches
+.ipynb_checkpoints/
+
+# Local config/secrets
+.env
+.secrets/
+
+# Git
+.git
+.gitignore
+
+# OS
+*.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode
+
+# Logs
+*.log
+
+# Environment variables
+*.env
+.env
+.env.*
+
+# Cache
+.cache
+.mypy_cache
+
+# Node.js
+node_modules
