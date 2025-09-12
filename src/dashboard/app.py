@@ -242,7 +242,7 @@ with st.expander("Regression-based forecasting", expanded=False):
         run_lr = st.button("Run Linear Forecast")
         if run_lr:
             try:
-                lr_path = "time_series_forecasted_data.csv"  # reuse the same path pattern for now
+                lr_path = "linear_forecasted_data.csv" 
                 linear_forecast(
                     df_lr,
                     horizon=int(lr_horizon),
