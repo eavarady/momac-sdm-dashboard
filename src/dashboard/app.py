@@ -142,12 +142,25 @@ if top3.empty:
 else:
     st.dataframe(top3, width="stretch")
 
-# BOTTLENECK FORECASTING HEADER
-st.subheader("Bottleneck Forecasting")
-st.write("Forecasting potential bottlenecks based on historical data.")
+# FORECASTING HEADER
+st.subheader("Production Performance Forecasting")
+st.write("Forecast aggregated production metrics and explore what‑if scenarios.")
 
 with st.expander("Time Series Forecasting", expanded=True):
     df = _tables.get("production_log", pd.DataFrame())
+    # Friendly aggregation metric labels -> internal codes2
+    AGG_FRIENDLY = {
+        "Average Cycle Time (mean)": "mean",
+        "Typical Cycle Time (median)": "median",
+        "Total Processing Hours (sum)": "sum",
+        "Completed Runs (count)": "count",
+    }
+    Y_AXIS_TITLES = {
+        "mean": "Average Cycle Time (hrs)",
+        "median": "Typical Cycle Time (hrs)",
+        "sum": "Total Processing Hours (hrs)",
+        "count": "Completed Runs (count)",
+    }
     # Forecast settings
     col_fs1, col_fs2, col_fs3 = st.columns(3)
     with col_fs1:
@@ -174,9 +187,14 @@ with st.expander("Time Series Forecasting", expanded=True):
         )
 
     agg_freq = st.selectbox("Aggregation Frequency", ["D", "W", "M"], index=0)
-    agg_metric = st.selectbox(
-        "Aggregation Metric", ["mean", "median", "sum", "count"], index=0
+    agg_metric_label = st.selectbox(
+        "Aggregation Metric",
+        list(AGG_FRIENDLY.keys()),
+        index=0,
+        help="How to aggregate event durations inside each period.",
+        key="ts_metric",
     )
+    agg_metric = AGG_FRIENDLY[agg_metric_label]
 
     if df.empty:
         st.info("No production_log data available for forecasting.")
@@ -205,12 +223,14 @@ with st.expander("Time Series Forecasting", expanded=True):
                         f"Forecast complete. Effective horizon: {future_rows} periods."
                     )
                     fig_fc = build_forecast_line(fc)
+                    fig_fc.update_yaxes(title=Y_AXIS_TITLES.get(agg_metric, "Value"))
                     st.plotly_chart(fig_fc, use_container_width=True)
             except Exception as e:
                 st.error(f"Forecasting failed: {e}")
 
 # LINEAR REGRESSION-BASED FORECASTING
 with st.expander("Regression-based forecasting", expanded=False):
+    
     df_lr = _tables.get("production_log", pd.DataFrame())
 
     # Same basic controls for consistency
@@ -229,12 +249,14 @@ with st.expander("Regression-based forecasting", expanded=False):
         lr_multiplier = st.number_input(
             "Horizon Multiplier", min_value=0.1, max_value=10.0, value=1.0, step=0.1, key="lr_mult"
         )
-        lr_agg_metric = st.selectbox(
+        lr_agg_metric_label = st.selectbox(
             "Aggregation Metric",
-            ["mean", "median", "sum", "count"],
+            list(AGG_FRIENDLY.keys()),
             index=0,
             key="lr_metric",
+            help="How to aggregate event durations inside each period.",
         )
+        lr_agg_metric = AGG_FRIENDLY[lr_agg_metric_label]
 
     if df_lr.empty:
         st.info("No production_log data available for regression-based forecasting.")
@@ -259,13 +281,204 @@ with st.expander("Regression-based forecasting", expanded=False):
                         f"Linear forecast complete. Effective horizon: {future_rows_lr} periods."
                     )
                     fig_lr = build_forecast_line(fc_lr)
+                    fig_lr.update_yaxes(title=Y_AXIS_TITLES.get(lr_agg_metric, "Value"))
                     st.plotly_chart(fig_lr, use_container_width=True)
                 
             except Exception as e:
                 st.error(f"Linear forecasting failed: {e}")
 
-# MULTIVARIATE REGRESSION FORECASTING (PLACEHOLDER)
-st.write("Multivariate regression forecasting (placeholder)")
+"""Multivariate Regression Scenario (UI only for now)"""
+with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
+    st.caption(
+        "Configure a what-if scenario using assumed values for operational drivers.",
+        help=(
+            "Multivariate regression forecasting lets you run ‘what-if’ scenarios by fixing "
+            "assumptions about key factors (like machine downtime %, operator count, shift type, "
+            "or defect rate) and seeing how they affect production metrics. Unlike "
+            "simple regression-based forecasts, which only use time, this approach allows you to explore how "
+            "different operational conditions might impact outcomes. Think of it as a scenario "
+            "planner: you choose the values, and the model shows the projected trend under those "
+            "conditions."
+        ),
+    )
+
+    # Core forecast controls (mirrors earlier sections; unique keys to avoid clashes)
+    col_mv1, col_mv2 = st.columns(2)
+    with col_mv1:
+        mv_horizon = st.number_input(
+            "Requested Horizon (periods)",
+            min_value=1,
+            max_value=720,
+            value=60,
+            step=1,
+            key="mv_horizon",
+        )
+        mv_agg_freq = st.selectbox(
+            "Aggregation Frequency", ["D", "W", "M"], index=0, key="mv_freq"
+        )
+        mv_agg_metric_label = st.selectbox(
+            "Aggregation Metric",
+            list(AGG_FRIENDLY.keys()),
+            index=0,
+            key="mv_metric",
+            help="How to aggregate event durations inside each period.",
+        )
+        mv_agg_metric = AGG_FRIENDLY[mv_agg_metric_label]
+    with col_mv2:
+        mv_adapt = st.checkbox(
+            "Adaptive Horizon", value=True, key="mv_adapt", help="Reduce horizon based on history span * multiplier"
+        )
+        mv_multiplier = st.number_input(
+            "Horizon Multiplier",
+            min_value=0.1,
+            max_value=10.0,
+            value=1.0,
+            step=0.1,
+            key="mv_mult",
+        )
+    # No explicit baseline strategy selector here; multivariate regression will auto-fallback
+    # to persistence (extend last or single value) only when data is insufficient.
+
+    st.markdown("---")
+    st.subheader("Scenario Variables")
+    st.caption(
+    "Select which operational drivers to include. Only selected variables will be used to train the model."
+    )
+
+    # Determine simple defaults from data (if available)
+    machines_df = _tables.get("machines", pd.DataFrame())
+    quality_df = _tables.get("quality_checks", pd.DataFrame())
+    prod_log_df = _tables.get("production_log", pd.DataFrame())
+    operators_df = _tables.get("operators", pd.DataFrame())
+
+    # Downtime % default: proportion of machines not 'online'.
+    if not machines_df.empty and {"status"}.issubset(machines_df.columns):
+        status_series = machines_df["status"].astype(str).str.lower()
+        inactive_ratio = (status_series.ne("online").sum() / max(1, len(status_series))) * 100.0
+    else:
+        inactive_ratio = 5.0
+
+    # Operator count default
+    default_operator_count = int(len(operators_df)) if not operators_df.empty else 10
+
+    # Defect rate default (fail / total *100)
+    if not quality_df.empty and {"result"}.issubset(quality_df.columns):
+        total_q = len(quality_df)
+        fails = (quality_df["result"].str.lower() == "fail").sum()
+        default_defect_rate = (fails / max(1, total_q)) * 100.0
+    else:
+        default_defect_rate = 5.0
+
+    # Shift type heuristic (most common shift or day if absent)
+    lines_df = _tables.get("production_lines", pd.DataFrame())
+    if not lines_df.empty and {"shift"}.issubset(lines_df.columns):
+        shift_col = lines_df["shift"].dropna().astype(str)
+        # Unique observed shift options
+        shift_options = sorted(shift_col.unique().tolist())
+        # Safe mode(): may be empty after dropna
+        common_shift = shift_col.mode().iloc[0] if not shift_col.mode().empty else (shift_options[0] if shift_options else "day")
+    else:
+        shift_options = ["day", "night"]
+        common_shift = "day"
+
+    # Friendly label -> internal feature key mapping (internal keys stay stable for modeling)
+    FEATURE_LABELS = {
+        "Machine downtime %": "machine_downtime_pct",
+        "Operator count": "operator_count",
+        "Shift type": "shift_type",
+        "Defect rate %": "defect_rate_pct",
+    }
+
+    col_vars1, col_vars2 = st.columns(2)
+    with col_vars1:
+        inc_downtime = st.checkbox(
+            "Machine downtime %", value=False, key="mv_inc_downtime", help="Feature key: machine_downtime_pct"
+        )
+        inc_operator_count = st.checkbox(
+            "Operator count", value=False, key="mv_inc_ops", help="Feature key: operator_count"
+        )
+    with col_vars2:
+        inc_shift_type = st.checkbox(
+            "Shift type", value=False, key="mv_inc_shift", help="Feature key: shift_type"
+        )
+        inc_defect_rate = st.checkbox(
+            "Defect rate %", value=False, key="mv_inc_defect", help="Feature key: defect_rate_pct"
+        )
+
+    # Inputs for selected variables
+    col_inputs1, col_inputs2 = st.columns(2)
+    with col_inputs1:
+        if inc_downtime:
+            downtime_pct = st.slider(
+                "Assumed Machine Downtime %",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(round(inactive_ratio, 2)),
+                step=0.5,
+                key="mv_downtime_pct",
+            )
+        if inc_operator_count:
+            operator_count = st.number_input(
+                "Assumed Operator Count",
+                min_value=0,
+                max_value=10000,
+                value=default_operator_count,
+                step=1,
+                key="mv_operator_count",
+            )
+    with col_inputs2:
+        if inc_shift_type:
+            shift_type_val = st.selectbox(
+                "Assumed Shift Type", shift_options, index=shift_options.index(common_shift) if common_shift in shift_options else 0, key="mv_shift_type"
+            )
+        if inc_defect_rate:
+            defect_rate_pct = st.slider(
+                "Assumed Defect Rate %",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(round(default_defect_rate, 2)),
+                step=0.5,
+                key="mv_defect_rate",
+            )
+
+    st.markdown("---")
+    run_mv = st.button("Generate Multivariate Scenario (Placeholder)")
+    if run_mv:
+        scenario = {
+            "horizon": int(mv_horizon),
+            "adapt_horizon": bool(mv_adapt),
+            "horizon_multiplier": float(mv_multiplier),
+            "aggregation": {"freq": mv_agg_freq, "metric": mv_agg_metric},
+            "included_variables": [],
+            "assumptions": {},
+        }
+        if inc_downtime:
+            fk = FEATURE_LABELS["Machine downtime %"]
+            scenario["included_variables"].append(fk)
+            scenario["assumptions"][fk] = downtime_pct
+        if inc_operator_count:
+            fk = FEATURE_LABELS["Operator count"]
+            scenario["included_variables"].append(fk)
+            scenario["assumptions"][fk] = int(operator_count)
+        if inc_shift_type:
+            fk = FEATURE_LABELS["Shift type"]
+            scenario["included_variables"].append(fk)
+            scenario["assumptions"][fk] = shift_type_val
+        if inc_defect_rate:
+            fk = FEATURE_LABELS["Defect rate %"]
+            scenario["included_variables"].append(fk)
+            scenario["assumptions"][fk] = defect_rate_pct
+        st.success("Scenario configured (no model applied yet).")
+        st.json(scenario)
+        st.info(
+            "Model training & multivariate prediction not yet implemented. This UI is a placeholder. Only the listed included_variables will become features when the model layer is added."
+        )
+        if scenario["included_variables"]:
+            st.caption("Feature set preview: time_index + " + ", ".join(scenario["included_variables"]))
+        else:
+            st.warning("No variables selected. Only a time trend would be available for modeling.")
+        # Persist in session_state so future model layer can consume without rewiring UI
+        st.session_state["multivariate_scenario"] = scenario
 
 
 # Gantt charts
