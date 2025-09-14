@@ -147,6 +147,15 @@ st.subheader("Production Performance Forecasting")
 st.write("Forecast aggregated production metrics and explore what‑if scenarios.")
 
 with st.expander("Time Series Forecasting", expanded=True):
+    st.caption(
+        "Predict future performance trends using time series patterns and seasonality.",
+        help=(
+            "Time series forecasting looks at past performance over time and projects it forward, "
+            "automatically capturing patterns like trends and seasonality. Instead of "
+            "just drawing a straight line, it can curve and adjust to repeating cycles "
+            "in the data (for example, weekly or seasonal patterns)."
+        ),
+    )
     df = _tables.get("production_log", pd.DataFrame())
     # Friendly aggregation metric labels -> internal codes2
     AGG_FRIENDLY = {
@@ -230,7 +239,15 @@ with st.expander("Time Series Forecasting", expanded=True):
 
 # LINEAR REGRESSION-BASED FORECASTING
 with st.expander("Regression-based forecasting", expanded=False):
-    
+    st.caption(
+        "Predict future performance trends using linear regression.",
+        help=(
+            "Linear regression looks at past data and finds a straight line that best fits the trend. "
+            "Imagine plotting dots on a chart and drawing the line that best passes through them. "
+            "That line is then extended into the future to produce a forecast. "
+            "It's a simple approach that's most useful when the data shows a clear upward or downward trend."
+        ),
+    )
     df_lr = _tables.get("production_log", pd.DataFrame())
 
     # Same basic controls for consistency
@@ -287,7 +304,6 @@ with st.expander("Regression-based forecasting", expanded=False):
             except Exception as e:
                 st.error(f"Linear forecasting failed: {e}")
 
-"""Multivariate Regression Scenario (UI only for now)"""
 with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
     st.caption(
         "Configure a what-if scenario using assumed values for operational drivers.",
