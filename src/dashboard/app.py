@@ -126,27 +126,11 @@ col6.metric("On-Time Rate", f"{(kpis.get('on_time_rate') or 0.0)*100:.1f}%")
 
 ### BOTTLENECK DETECTION AND FORECASTING ###
 
-# HEURISTIC BOTTLENECK DETECTION
-
-bn = detect_bottleneck(
-    _tables.get("process_steps", pd.DataFrame()),
-    _tables.get("production_log", pd.DataFrame()),
-)
-# st.subheader("Largest bottleneck")
-# st.write(bn or "No bottleneck detected.")
-st.subheader("Top 3 Bottlenecks by WIP")
-prod = _tables.get("production_log", pd.DataFrame())
-top3 = top_bottlenecks(prod, top_n=3)
-if top3.empty:
-    st.write("No in-progress work detected.")
-else:
-    st.dataframe(top3, width="stretch")
-
 # FORECASTING HEADER
 st.subheader("Production Performance Forecasting")
 st.write("Forecast aggregated production metrics and explore what‑if scenarios.")
 
-with st.expander("Time Series Forecasting", expanded=True):
+with st.expander("Time Series Forecasting", expanded=False):
     st.caption(
         "Predict future performance trends using time series patterns and seasonality.",
         help=(
@@ -495,6 +479,21 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             st.warning("No variables selected. Only a time trend would be available for modeling.")
         # Persist in session_state so future model layer can consume without rewiring UI
         st.session_state["multivariate_scenario"] = scenario
+
+
+
+# HEURISTIC BOTTLENECK DETECTION
+bn = detect_bottleneck(
+    _tables.get("process_steps", pd.DataFrame()),
+    _tables.get("production_log", pd.DataFrame()),
+)
+st.subheader("Top 3 Bottlenecks by WIP")
+prod = _tables.get("production_log", pd.DataFrame())
+top3 = top_bottlenecks(prod, top_n=3)
+if top3.empty:
+    st.write("No in-progress work detected.")
+else:
+    st.dataframe(top3, width="stretch")
 
 
 # Gantt charts
