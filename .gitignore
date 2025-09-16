@@ -22,3 +22,4 @@ __pycache__/
 # Forecast-produced tables
 linear_forecasted_data.csv
 time_series_forecasted_data.csv
+multivariate_forecasted_data.csv
