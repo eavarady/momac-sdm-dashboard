@@ -16,7 +16,7 @@ from visualizations.gantt import GanttChart
 from kpi.progress import (
     per_step_progress,
     overall_progress_by_product,
-    per_step_progress_by_run,
+    per_run_progress,
 )
 from ml.time_series import time_series_forecast
 from visualizations.line_chart import build_forecast_line
@@ -526,9 +526,7 @@ else:
 
 
 sp = per_step_progress(steps, prod, targets=targets if not targets.empty else None)
-spr = per_step_progress_by_run(
-    steps, prod, targets=targets if not targets.empty else None
-)
+spr = per_run_progress(steps, prod, targets=targets if not targets.empty else None)
 overall = overall_progress_by_product(sp)
 
 st.subheader("Progress")
@@ -542,24 +540,19 @@ if not overall.empty:
 else:
     st.info("No overall progress available (check data or filters).")
 
-# Per-run per-step table
-st.subheader("Per-Run Step Progress")
+# Per-run progress table
+st.subheader("Per-Run Progress")
 if not spr.empty:
     disp_run = spr.copy()
     disp_run["progress_pct"] = (disp_run["progress"].astype(float) * 100.0).round(1)
-    cols = ["product_id", "run_id", "step_id"]
-    if "step_name" in disp_run.columns:
-        cols.insert(2, "step_name")
-    cols += [
-        c
-        for c in ["complete_qty", "in_progress_qty", "target_qty", "progress_pct"]
-        if c in disp_run.columns
-    ]
+    cols = ["product_id", "run_id"]
+    # Include target if available, then the percent
+    if "target_qty" in disp_run.columns:
+        cols.append("target_qty")
+    cols.append("progress_pct")
     st.dataframe(disp_run[cols], width="stretch")
 else:
-    st.info(
-        "No per-run progress available (missing run_id in production_log or no activity)."
-    )
+    st.info("No per-run progress available (check run_id and data).")
 
 # Data preview.
 # NOTE: Let's keep this at the bottom as a footer when adding future data viz content.

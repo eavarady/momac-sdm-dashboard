@@ -172,9 +172,9 @@ def generate_mock_data(
     # Production Targets (run-based, default target_qty=1 unless provided elsewhere)
     if not production_log.empty:
         pt_df = (
-            production_log[["run_id", "product_id"]]
-            .drop_duplicates()
-            .assign(target_qty=random.randint(1, 10))
+            production_log[["run_id", "product_id"]].drop_duplicates()
+            # assign a per-run random target between 1 and 10
+            .assign(target_qty=lambda d: [random.randint(1, 10) for _ in range(len(d))])
         )
         pt_df.to_csv(DATA / "production_targets.csv", index=False)
 
