@@ -18,7 +18,7 @@ Temporal feature engineering:
 
 Scenario assumptions NEVER overwrite history; they only shape future rows.
 
-If user selects zero features: baseline mean forecast (model_label=mv-baseline-mean).
+If user selects zero features: we raise an error (UI catches and prompts user to select a variable). No silent mean fallback.
 
 
 """
@@ -270,26 +270,9 @@ def run_multivariate_forecast(
     else:
         eff_horizon = horizon
 
-    # If user selected zero features -> simple baseline mean forecast (early return
+    # If user selected zero features -> explicit error (UI will display guidance)
     if not included:
-        if eff_horizon > 0:
-            future_ds = _infer_future_index(target["ds"].max(), eff_horizon, target["ds"])
-        else:
-            future_ds = []
-        base_value = float(target["y"].mean())
-        yhat_hist = [base_value] * len(target)
-        yhat_future = [base_value] * len(future_ds)
-        combined_ds = list(target["ds"]) + future_ds
-        forecast = build_forecast_frame(
-            combined_ds,
-            yhat_hist + yhat_future,
-            model_label="mv-baseline-mean",
-            y=list(target["y"]) + [np.nan] * len(future_ds),
-        )
-        if config.require_non_negative:
-            forecast["yhat"] = forecast["yhat"].clip(lower=0.0)
-        forecast.to_csv(output_path, index=False)
-        return forecast
+        raise ValueError("No scenario variables selected; select at least one scenario variable to run a multivariate scenario.")
 
     # Feature matrix for history (no scenario overrides)
     feat_hist = _compute_feature_series(tables, target["ds"], config.agg_freq, included)
@@ -335,10 +318,12 @@ def run_multivariate_forecast(
     # Align features on ds
     feature_full["ds"] = feature_full.index
     merged = merged.merge(feature_full, on="ds", how="left")
+    # Ensure chronological order then add explicit time index feature 't'
+    merged = merged.sort_values("ds").reset_index(drop=True)
+    merged["t"] = range(len(merged))
 
-    # Determine feature columns actually used
-    feature_cols = [c for c in included if c in merged.columns]
-    # (feature_cols guaranteed non-empty here due to early return above)
+    # Determine feature columns: always include time index plus selected scenario features that are present
+    feature_cols = ["t"] + [c for c in included if c in merged.columns]
 
     # Separate historical rows for fitting
     hist_mask = merged["y"].notna()
@@ -355,12 +340,14 @@ def run_multivariate_forecast(
         transformers.append(("cat", OneHotEncoder(handle_unknown="ignore"), categorical))
     preprocessor = ColumnTransformer(transformers, remainder="drop")
 
-    if len(feature_cols) == 1 and not categorical:
-        estimator = LinearRegression()
-        model_label = "mv-linear"
-    else:
+    # Choose estimator: if multiple non-time driver features, use Ridge for stability.
+    driver_features = [c for c in feature_cols if c != "t"]
+    if len(driver_features) > 1:
         estimator = Ridge(alpha=1.0, random_state=42)
         model_label = "mv-ridge"
+    else:
+        estimator = LinearRegression()
+        model_label = "mv-linear"
 
     pipe = Pipeline([
         ("prep", preprocessor),
