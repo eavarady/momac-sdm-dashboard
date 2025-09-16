@@ -15,13 +15,12 @@ Categorical (shift_type): non_null >= 3, distinct >= 2.
 
 Temporal feature engineering:
     * defect_rate_pct: per-period (fails/total * 100) using timestamps if present.
-    * Others currently static snapshots (downtime %, operator count, shift type).
 
 Scenario assumptions NEVER overwrite history; they only shape future rows.
 
 If user selects zero features: baseline mean forecast (model_label=mv-baseline-mean).
 
-Not (yet) implemented: caching, lag features, downtime history derivation.
+
 """
 
 from __future__ import annotations
@@ -43,9 +42,6 @@ from .ts_utils import (
 
 
 SUPPORTED_FEATURES = {
-    "machine_downtime_pct",
-    "operator_count",
-    "shift_type",
     "defect_rate_pct",
 }
 
@@ -140,31 +136,7 @@ def _compute_feature_series(
     """Build raw historical feature series (no scenario overrides)."""
     feats: Dict[str, pd.Series] = {}
 
-    # Machine downtime % (static snapshot for now)
-    if "machine_downtime_pct" in included:
-        machines = tables.get("machines", pd.DataFrame())
-        if not machines.empty and "status" in machines.columns:
-            status = machines["status"].astype(str).str.lower()
-            downtime_pct = (status.ne("online").sum() / max(1, len(status))) * 100.0
-        else:
-            downtime_pct = 5.0
-        feats["machine_downtime_pct"] = pd.Series([downtime_pct] * len(ds_index), index=ds_index)
-
-    # Operator count (static snapshot)
-    if "operator_count" in included:
-        operators = tables.get("operators", pd.DataFrame())
-        op_count = int(len(operators)) if not operators.empty else 10
-        feats["operator_count"] = pd.Series([op_count] * len(ds_index), index=ds_index)
-
-    # Shift type (categorical constant for now)
-    if "shift_type" in included:
-        lines = tables.get("production_lines", pd.DataFrame())
-        if not lines.empty and "shift" in lines.columns and lines["shift"].dropna().any():
-            shift_col = lines["shift"].dropna().astype(str)
-            mode_shift = shift_col.mode().iloc[0]
-        else:
-            mode_shift = "day"
-        feats["shift_type"] = pd.Series([mode_shift] * len(ds_index), index=ds_index, dtype="object")
+    # (operator_count, shift_type removed until temporal sources exist)
 
     # Defect rate % (temporal if timestamps exist)
     if "defect_rate_pct" in included:
@@ -303,9 +275,10 @@ def run_multivariate_forecast(
 
     # If user selected features, enforce adequacy; else allow baseline later.
     if included:
-        # Determine categorical (currently only shift_type)
-        categorical = [c for c in included if c == "shift_type" and c in feat_hist.columns]
-        ok, failures, _stats = _evaluate_feature_adequacy(feat_hist[[c for c in feat_hist.columns if c in included]], categorical)
+        categorical: List[str] = []  # currently no categorical features active
+        ok, failures, _stats = _evaluate_feature_adequacy(
+            feat_hist[[c for c in feat_hist.columns if c in included]], categorical
+        )
         if not ok:
             raise ForecastFeatureAdequacyError(failures)
 
@@ -364,7 +337,7 @@ def run_multivariate_forecast(
     train_df = merged.loc[hist_mask].copy()
 
     # Identify categorical / numeric
-    categorical = [c for c in feature_cols if c == "shift_type"]
+    categorical = []
     numeric = [c for c in feature_cols if c not in categorical]
 
     transformers = []

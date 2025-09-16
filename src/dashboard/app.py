@@ -294,8 +294,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
         "Configure a what-if scenario using assumed values for operational drivers.",
         help=(
             "Multivariate regression forecasting lets you run ‘what-if’ scenarios by fixing "
-            "assumptions about key factors (like machine downtime %, operator count, shift type, "
-            "or defect rate) and seeing how they affect production metrics. Unlike "
+            "assumptions about key factors (like operator count, shift type, or defect rate) and seeing how they affect production metrics. Unlike "
             "simple regression-based forecasts, which only use time, this approach allows you to explore how "
             "different operational conditions might impact outcomes. Think of it as a scenario "
             "planner: you choose the values, and the model shows the projected trend under those "
@@ -343,7 +342,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
     st.markdown("---")
     st.subheader("Scenario Variables")
     st.caption(
-    "Select which operational drivers to include. Only selected variables will be used to train the model."
+    "Currently only defect rate % is available (others removed until temporal history exists)."
     )
 
     # Determine simple defaults from data (if available)
@@ -352,15 +351,8 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
     prod_log_df = _tables.get("production_log", pd.DataFrame())
     operators_df = _tables.get("operators", pd.DataFrame())
 
-    # Downtime % default: proportion of machines not 'online'.
-    if not machines_df.empty and {"status"}.issubset(machines_df.columns):
-        status_series = machines_df["status"].astype(str).str.lower()
-        inactive_ratio = (status_series.ne("online").sum() / max(1, len(status_series))) * 100.0
-    else:
-        inactive_ratio = 5.0
-
     # Operator count default
-    default_operator_count = int(len(operators_df)) if not operators_df.empty else 10
+    # operator_count removed until temporal history exists
 
     # Defect rate default (fail / total *100)
     if not quality_df.empty and {"result"}.issubset(quality_df.columns):
@@ -384,54 +376,22 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
 
     # Friendly label -> internal feature key mapping (internal keys stay stable for modeling)
     FEATURE_LABELS = {
-        "Machine downtime %": "machine_downtime_pct",
-        "Operator count": "operator_count",
-        "Shift type": "shift_type",
         "Defect rate %": "defect_rate_pct",
     }
 
     col_vars1, col_vars2 = st.columns(2)
     with col_vars1:
-        inc_downtime = st.checkbox(
-            "Machine downtime %", value=False, key="mv_inc_downtime", help="Feature key: machine_downtime_pct"
-        )
-        inc_operator_count = st.checkbox(
-            "Operator count", value=False, key="mv_inc_ops", help="Feature key: operator_count"
-        )
-    with col_vars2:
-        inc_shift_type = st.checkbox(
-            "Shift type", value=False, key="mv_inc_shift", help="Feature key: shift_type"
-        )
         inc_defect_rate = st.checkbox(
             "Defect rate %", value=False, key="mv_inc_defect", help="Feature key: defect_rate_pct"
         )
+    with col_vars2:
+        st.write("")
 
     # Inputs for selected variables
     col_inputs1, col_inputs2 = st.columns(2)
     with col_inputs1:
-        if inc_downtime:
-            downtime_pct = st.slider(
-                "Assumed Machine Downtime %",
-                min_value=0.0,
-                max_value=100.0,
-                value=float(round(inactive_ratio, 2)),
-                step=0.5,
-                key="mv_downtime_pct",
-            )
-        if inc_operator_count:
-            operator_count = st.number_input(
-                "Assumed Operator Count",
-                min_value=0,
-                max_value=10000,
-                value=default_operator_count,
-                step=1,
-                key="mv_operator_count",
-            )
+        pass
     with col_inputs2:
-        if inc_shift_type:
-            shift_type_val = st.selectbox(
-                "Assumed Shift Type", shift_options, index=shift_options.index(common_shift) if common_shift in shift_options else 0, key="mv_shift_type"
-            )
         if inc_defect_rate:
             defect_rate_pct = st.slider(
                 "Assumed Defect Rate %",
@@ -453,18 +413,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             "included_variables": [],
             "assumptions": {},
         }
-        if inc_downtime:
-            fk = FEATURE_LABELS["Machine downtime %"]
-            scenario["included_variables"].append(fk)
-            scenario["assumptions"][fk] = downtime_pct
-        if inc_operator_count:
-            fk = FEATURE_LABELS["Operator count"]
-            scenario["included_variables"].append(fk)
-            scenario["assumptions"][fk] = int(operator_count)
-        if inc_shift_type:
-            fk = FEATURE_LABELS["Shift type"]
-            scenario["included_variables"].append(fk)
-            scenario["assumptions"][fk] = shift_type_val
+    # (operator_count, shift_type removed)
         if inc_defect_rate:
             fk = FEATURE_LABELS["Defect rate %"]
             scenario["included_variables"].append(fk)
