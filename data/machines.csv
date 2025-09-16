@@ -1,6 +1,6 @@
 machine_id,line_id,type,status
-MX-101,LINE-A,Press,active
-MX-102,LINE-B,CNC,active
-MX-103,LINE-A,CNC,active
+MX-101,LINE-A,Press,online
+MX-102,LINE-B,CNC,online
+MX-103,LINE-A,CNC,online
 MX-104,LINE-B,Press,offline
-MX-105,LINE-A,RobotArm,active
+MX-105,LINE-A,RobotArm,online

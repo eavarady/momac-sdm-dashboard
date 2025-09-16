@@ -38,16 +38,12 @@ class MachineRow(_Row):
     @classmethod
     def _status_norm(cls, v):
         s = str(v).strip().lower()
-        # map common synonyms to canonical values
-        synonyms = {
-            "active": "online",
-            "up": "online",
-            "down": "offline",
-            "stopped": "offline",
-            "maint": "maintenance",
-            "maintenance": "maintenance",
-        }
-        return synonyms.get(s, s)
+        allowed = {"online", "offline", "maintenance"}
+        if s not in allowed:
+            raise ValueError(
+                f"invalid status '{s}' (allowed: online, offline, maintenance)"
+            )
+        return s
 
 
 class ProductionLineRow(_Row):
@@ -215,8 +211,10 @@ class ProductionLogRow(_Row):
     @classmethod
     def _status_norm(cls, v):
         s = str(v).strip().lower()
-        # normalize common synonyms
-        return {"completed": "complete", "inprogress": "in_progress"}.get(s, s)
+        allowed = {"complete", "in_progress"}
+        if s not in allowed:
+            raise ValueError(f"invalid status '{s}' (allowed: complete, in_progress)")
+        return s
 
     @field_validator("quantity", mode="before")
     @classmethod
@@ -266,7 +264,8 @@ class QualityCheckRow(_Row):
     timestamp: datetime
     product_id: str
     check_type: str
-    result: Literal["pass", "fail", "rework"]
+    # Only allow explicit 'pass' or 'fail'. Previously allowed 'rework' and synonym mapping.
+    result: Literal["pass", "fail"]
     inspector_id: Optional[str] = None
 
     @field_validator("timestamp", mode="before")
@@ -278,8 +277,10 @@ class QualityCheckRow(_Row):
     @classmethod
     def _result_norm(cls, v):
         s = str(v).strip().lower()
-        # map common synonyms
-        return {"passed": "pass", "ok": "pass", "failed": "fail"}.get(s, s)
+        allowed = {"pass", "fail"}
+        if s not in allowed:
+            raise ValueError("invalid result '{s}' (allowed: pass, fail)")
+        return s
 
     @field_validator("product_id", "check_type", "inspector_id", mode="before")
     @classmethod
