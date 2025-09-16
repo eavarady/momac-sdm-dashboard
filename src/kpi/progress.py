@@ -88,15 +88,17 @@ def per_step_progress(
 
     # If targets provided, override per-step progress where a positive target exists
     if targets is not None and not targets.empty:
-        t = targets[["product_id", "step_id", "target_qty"]].copy()
-        t["target_qty"] = pd.to_numeric(t["target_qty"], errors="coerce").fillna(0)
-        merged = merged.merge(t, on=["product_id", "step_id"], how="left")
+        # For backward compatibility, only apply overrides when step-level targets are present.
+        if {"product_id", "step_id", "target_qty"}.issubset(targets.columns):
+            t = targets[["product_id", "step_id", "target_qty"]].copy()
+            t["target_qty"] = pd.to_numeric(t["target_qty"], errors="coerce").fillna(0)
+            merged = merged.merge(t, on=["product_id", "step_id"], how="left")
 
-        has_target = merged["target_qty"].fillna(0) > 0
-        merged.loc[has_target, "progress"] = (
-            merged.loc[has_target, "complete_qty"]
-            / merged.loc[has_target, "target_qty"]
-        ).clip(0, 1)
+            has_target = merged["target_qty"].fillna(0) > 0
+            merged.loc[has_target, "progress"] = (
+                merged.loc[has_target, "complete_qty"]
+                / merged.loc[has_target, "target_qty"]
+            ).clip(0, 1)
 
     # Order columns nicely
     ordered_cols = ["product_id", "step_id"]
@@ -137,3 +139,103 @@ def overall_progress_by_product(step_progress: pd.DataFrame) -> pd.DataFrame:
     grp = grp.rename(columns={"progress": "overall_progress"})
 
     return grp[["product_id", "overall_progress"]]
+
+
+def per_step_progress_by_run(
+    process_steps: pd.DataFrame,
+    production_log: pd.DataFrame,
+    targets: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """
+    Compute per-step progress per run.
+    Returns DataFrame with:
+      product_id, run_id, step_id[, step_name], complete_qty, in_progress_qty, progress (0..1)
+
+    Notes:
+    - Targets are currently ignored unless step-level targets are provided; run-level targets
+      should be applied at run roll-up time, not per-step, to avoid ambiguity.
+    """
+    cols = ["product_id", "step_id"] + (
+        ["step_name"] if "step_name" in process_steps.columns else []
+    )
+    base = process_steps.loc[:, cols].drop_duplicates().copy()
+    if base.empty or production_log.empty:
+        out_cols = (
+            ["product_id", "run_id", "step_id"]
+            + (["step_name"] if "step_name" in base.columns else [])
+            + ["complete_qty", "in_progress_qty", "progress"]
+        )
+        return pd.DataFrame(columns=out_cols)
+
+    log = _normalize_status_col(production_log.copy())
+    if "quantity" in log.columns:
+        log["quantity"] = pd.to_numeric(log["quantity"], errors="coerce").fillna(0)
+    else:
+        log["quantity"] = 0
+
+    # Identify runs present
+    runs = (
+        log[["product_id", "run_id"]]
+        .dropna(subset=["run_id"])  # only runs with an id
+        .drop_duplicates()
+    )
+    if runs.empty:
+        # No run ids -> fall back to empty
+        out_cols = (
+            ["product_id", "run_id", "step_id"]
+            + (["step_name"] if "step_name" in base.columns else [])
+            + ["complete_qty", "in_progress_qty", "progress"]
+        )
+        return pd.DataFrame(columns=out_cols)
+
+    # Cross runs with steps to ensure unstarted steps appear
+    cross = runs.merge(base, on="product_id", how="left")
+
+    agg = (
+        log.groupby(["product_id", "run_id", "step_id", "status"], dropna=False)[
+            "quantity"
+        ]
+        .sum()
+        .reset_index()
+    )
+    pivot = agg.pivot_table(
+        index=["product_id", "run_id", "step_id"],
+        columns="status",
+        values="quantity",
+        fill_value=0,
+        aggfunc="sum",
+    ).reset_index()
+    for col in ("complete", "in_progress"):
+        if col not in pivot.columns:
+            pivot[col] = 0
+    pivot = pivot.rename(
+        columns={"complete": "complete_qty", "in_progress": "in_progress_qty"}
+    )
+
+    merged = cross.merge(pivot, on=["product_id", "run_id", "step_id"], how="left")
+    merged["complete_qty"] = merged["complete_qty"].fillna(0)
+    merged["in_progress_qty"] = merged["in_progress_qty"].fillna(0)
+
+    denom = merged["complete_qty"] + merged["in_progress_qty"]
+    merged["progress"] = 0.0
+    nz = denom > 0
+    merged.loc[nz, "progress"] = (merged.loc[nz, "complete_qty"] / denom.loc[nz]).clip(
+        0, 1
+    )
+
+    # Ignore run-level targets here; show target_qty only if step-level targets provided
+    if targets is not None and not targets.empty:
+        if {"product_id", "step_id", "target_qty"}.issubset(targets.columns):
+            t = targets[["product_id", "step_id", "target_qty"]].copy()
+            t["target_qty"] = pd.to_numeric(t["target_qty"], errors="coerce").fillna(0)
+            merged = merged.merge(t, on=["product_id", "step_id"], how="left")
+
+    ordered_cols = ["product_id", "run_id", "step_id"]
+    if "step_name" in merged.columns:
+        ordered_cols.insert(2, "step_name")
+    tail = ["complete_qty", "in_progress_qty"]
+    if "target_qty" in merged.columns:
+        tail.append("target_qty")
+    tail.append("progress")
+    ordered_cols += tail
+    return merged.loc[:, [c for c in ordered_cols if c in merged.columns]]

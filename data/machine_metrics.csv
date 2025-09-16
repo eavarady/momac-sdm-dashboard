@@ -1,9 +1,9 @@
 timestamp,machine_id,metric_type,metric_value
-2025-05-15T20:10:25Z,MX-105,throughput,69.54
-2025-01-27T18:43:24Z,MX-105,energy_consumption,40.71
-2025-06-13T03:13:52Z,MX-104,temperature,49.02
-2025-05-21T15:50:13Z,MX-104,energy_consumption,23.77
-2025-03-10T09:42:55Z,MX-105,energy_consumption,34.31
+2025-07-26T21:32:44Z,MX-104,energy_consumption,43.35
+2025-07-16T11:53:46Z,MX-103,temperature,86.46
+2025-07-10T09:00:39Z,MX-101,throughput,96.47
+2025-06-28T13:04:52Z,MX-102,throughput,25.85
+2025-07-22T15:01:55Z,MX-103,energy_consumption,82.74
 2025-07-29T00:08:06Z,MX-104,throughput,49.2
 2025-08-19T02:15:49Z,MX-103,throughput,86.65
 2025-02-03T15:45:24Z,MX-103,throughput,31.95

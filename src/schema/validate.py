@@ -54,7 +54,8 @@ TABLE_REGISTRY: Dict[str, Tuple[Type[BaseModel], Tuple[str, ...]]] = {
         QualityCheckRow,
         ("timestamp", "product_id", "check_type", "result", "inspector_id"),
     ),
-    "production_targets": (ProductionTargetRow, ("product_id", "step_id", "target_qty")),
+    # Strictly run-based targets: require run_id and target_qty (product_id optional/informational).
+    "production_targets": (ProductionTargetRow, ("run_id", "target_qty")),
 }
 
 
@@ -129,6 +130,12 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
             ["product_id", "step_id"],
             "process_steps.(product_id,step_id)",
         )
+    if "production_targets" in tables:
+        dup_errors(
+            tables["production_targets"],
+            ["run_id"],
+            "production_targets.run_id",
+        )
 
     # FKs
     if {"production_log", "process_steps"} <= tables.keys():
@@ -143,6 +150,17 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
             if key not in steps_keys:
                 errs.append(
                     f"FK production_log row {i+1}: step not found in process_steps (product_id={key[0]!r}, step_id={key[1]!r})"
+                )
+
+    if {"production_targets", "production_log"} <= tables.keys():
+        runset = set(
+            tables["production_log"]["run_id"].dropna().astype(str).unique().tolist()
+        )
+        for i, r in tables["production_targets"].reset_index(drop=True).iterrows():
+            rid = str(r.get("run_id", "") or "")
+            if rid not in runset:
+                errs.append(
+                    f"FK production_targets row {i+1}: run_id {rid!r} not found in production_log"
                 )
 
     if {"machine_metrics", "machines"} <= tables.keys():

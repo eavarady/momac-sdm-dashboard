@@ -169,6 +169,15 @@ def generate_mock_data(
     production_log = pd.DataFrame(production_log_rows)
     production_log.to_csv(DATA / "production_log.csv", index=False)
 
+    # Production Targets (run-based, default target_qty=1 unless provided elsewhere)
+    if not production_log.empty:
+        pt_df = (
+            production_log[["run_id", "product_id"]]
+            .drop_duplicates()
+            .assign(target_qty=random.randint(1, 10))
+        )
+        pt_df.to_csv(DATA / "production_targets.csv", index=False)
+
     # Machine Metrics (ISO timestamps)
     metrics_rows = []
     for _ in range(50):

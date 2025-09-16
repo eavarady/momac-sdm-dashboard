@@ -13,11 +13,18 @@ from adapters.excel_adapter import (
 from kpi.kpi_calculator import compute_all_kpis
 from ml.bottleneck_detector import detect_bottleneck, top_bottlenecks
 from visualizations.gantt import GanttChart
-from kpi.progress import per_step_progress, overall_progress_by_product
+from kpi.progress import (
+    per_step_progress,
+    overall_progress_by_product,
+    per_step_progress_by_run,
+)
 from ml.time_series import time_series_forecast
 from visualizations.line_chart import build_forecast_line
 from ml.linear_forecast import linear_forecast
-from ml.multivariate_forecast import run_multivariate_forecast, ForecastFeatureAdequacyError
+from ml.multivariate_forecast import (
+    run_multivariate_forecast,
+    ForecastFeatureAdequacyError,
+)
 
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
@@ -245,11 +252,18 @@ with st.expander("Regression-based forecasting", expanded=False):
             value=60,
             step=1,
         )
-        lr_agg_freq = st.selectbox("Aggregation Frequency", ["D", "W", "M"], index=0, key="lr_freq")
+        lr_agg_freq = st.selectbox(
+            "Aggregation Frequency", ["D", "W", "M"], index=0, key="lr_freq"
+        )
     with col_lr2:
         lr_adapt = st.checkbox("Adaptive Horizon", value=True, key="lr_adapt")
         lr_multiplier = st.number_input(
-            "Horizon Multiplier", min_value=0.1, max_value=10.0, value=1.0, step=0.1, key="lr_mult"
+            "Horizon Multiplier",
+            min_value=0.1,
+            max_value=10.0,
+            value=1.0,
+            step=0.1,
+            key="lr_mult",
         )
         lr_agg_metric_label = st.selectbox(
             "Aggregation Metric",
@@ -266,7 +280,7 @@ with st.expander("Regression-based forecasting", expanded=False):
         run_lr = st.button("Run Linear Forecast")
         if run_lr:
             try:
-                lr_path = "linear_forecasted_data.csv" 
+                lr_path = "linear_forecasted_data.csv"
                 linear_forecast(
                     df_lr,
                     horizon=int(lr_horizon),
@@ -276,6 +290,7 @@ with st.expander("Regression-based forecasting", expanded=False):
                     agg_metric=lr_agg_metric,
                 )
                 import os
+
                 if os.path.exists(lr_path):
                     fc_lr = pd.read_csv(lr_path, parse_dates=["ds"])
                     future_rows_lr = fc_lr[fc_lr["y"].isna()].shape[0]
@@ -285,7 +300,7 @@ with st.expander("Regression-based forecasting", expanded=False):
                     fig_lr = build_forecast_line(fc_lr)
                     fig_lr.update_yaxes(title=Y_AXIS_TITLES.get(lr_agg_metric, "Value"))
                     st.plotly_chart(fig_lr, use_container_width=True)
-                
+
             except Exception as e:
                 st.error(f"Linear forecasting failed: {e}")
 
@@ -326,7 +341,10 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
         mv_agg_metric = AGG_FRIENDLY[mv_agg_metric_label]
     with col_mv2:
         mv_adapt = st.checkbox(
-            "Adaptive Horizon", value=True, key="mv_adapt", help="Reduce horizon based on history span * multiplier"
+            "Adaptive Horizon",
+            value=True,
+            key="mv_adapt",
+            help="Reduce horizon based on history span * multiplier",
         )
         mv_multiplier = st.number_input(
             "Horizon Multiplier",
@@ -342,7 +360,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
     st.markdown("---")
     st.subheader("Scenario Variables")
     st.caption(
-    "Currently only defect rate % is available (others removed until temporal history exists)."
+        "Currently only defect rate % is available (others removed until temporal history exists)."
     )
 
     # Determine simple defaults from data (if available)
@@ -369,7 +387,11 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
         # Unique observed shift options
         shift_options = sorted(shift_col.unique().tolist())
         # Safe mode(): may be empty after dropna
-        common_shift = shift_col.mode().iloc[0] if not shift_col.mode().empty else (shift_options[0] if shift_options else "day")
+        common_shift = (
+            shift_col.mode().iloc[0]
+            if not shift_col.mode().empty
+            else (shift_options[0] if shift_options else "day")
+        )
     else:
         shift_options = ["day", "night"]
         common_shift = "day"
@@ -382,7 +404,10 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
     col_vars1, col_vars2 = st.columns(2)
     with col_vars1:
         inc_defect_rate = st.checkbox(
-            "Defect rate %", value=False, key="mv_inc_defect", help="Feature key: defect_rate_pct"
+            "Defect rate %",
+            value=False,
+            key="mv_inc_defect",
+            help="Feature key: defect_rate_pct",
         )
     with col_vars2:
         st.write("")
@@ -413,7 +438,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             "included_variables": [],
             "assumptions": {},
         }
-    # (operator_count, shift_type removed)
+        # (operator_count, shift_type removed)
         if inc_defect_rate:
             fk = FEATURE_LABELS["Defect rate %"]
             scenario["included_variables"].append(fk)
@@ -424,6 +449,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             fc_mv = run_multivariate_forecast(_tables, scenario, output_path=mv_path)
             st.success("Multivariate forecast generated.")
             from visualizations.line_chart import build_forecast_line as _bfl
+
             fig_mv = _bfl(fc_mv)
             Y_AXIS_TITLES = {
                 "mean": "Average Cycle Time (hrs)",
@@ -439,10 +465,11 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             st.info("Unselect the inadequate feature(s) and re-run the forecast.")
         except Exception as e:
             if not scenario["included_variables"]:
-                st.warning("Select at least one scenario variable to run a multivariate scenario.")
+                st.warning(
+                    "Select at least one scenario variable to run a multivariate scenario."
+                )
             else:
                 st.error(f"Multivariate forecasting failed: {e}")
-
 
 
 # HEURISTIC BOTTLENECK DETECTION
@@ -499,6 +526,9 @@ else:
 
 
 sp = per_step_progress(steps, prod, targets=targets if not targets.empty else None)
+spr = per_step_progress_by_run(
+    steps, prod, targets=targets if not targets.empty else None
+)
 overall = overall_progress_by_product(sp)
 
 st.subheader("Progress")
@@ -512,19 +542,24 @@ if not overall.empty:
 else:
     st.info("No overall progress available (check data or filters).")
 
-# Per-step table (shows target_qty when present)
-if not sp.empty:
-    disp = sp.copy()
-    disp["progress_pct"] = (disp["progress"] * 100).round(1)
-    cols = ["product_id", "step_id"]
-    if "step_name" in disp.columns:
-        cols.append("step_name")
-    if "target_qty" in disp.columns:
-        cols.append("target_qty")
-    cols += ["complete_qty", "in_progress_qty", "progress_pct"]
-    st.dataframe(disp[cols], width="stretch")
+# Per-run per-step table
+st.subheader("Per-Run Step Progress")
+if not spr.empty:
+    disp_run = spr.copy()
+    disp_run["progress_pct"] = (disp_run["progress"].astype(float) * 100.0).round(1)
+    cols = ["product_id", "run_id", "step_id"]
+    if "step_name" in disp_run.columns:
+        cols.insert(2, "step_name")
+    cols += [
+        c
+        for c in ["complete_qty", "in_progress_qty", "target_qty", "progress_pct"]
+        if c in disp_run.columns
+    ]
+    st.dataframe(disp_run[cols], width="stretch")
 else:
-    st.info("No step-level progress available.")
+    st.info(
+        "No per-run progress available (missing run_id in production_log or no activity)."
+    )
 
 # Data preview.
 # NOTE: Let's keep this at the bottom as a footer when adding future data viz content.

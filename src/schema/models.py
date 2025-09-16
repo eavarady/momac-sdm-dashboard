@@ -23,6 +23,7 @@ class _Row(BaseModel):
 
 # ---- Dimension tables -------------------------------------------------------
 
+
 class MachineRow(_Row):
     machine_id: str = Field(min_length=1)
     line_id: str = Field(min_length=1)
@@ -82,6 +83,7 @@ class OperatorRow(_Row):
 
 # ---- Process steps ----------------------------------------------------------
 
+
 class ProcessStepRow(_Row):
     product_id: str = Field(min_length=1)
     step_id: str = Field(min_length=1)
@@ -91,7 +93,9 @@ class ProcessStepRow(_Row):
     estimated_time: int = Field(ge=0, default=0)
     dependency_step_id: Optional[str] = None
 
-    @field_validator("product_id", "step_id", "step_name", "assigned_machine", mode="before")
+    @field_validator(
+        "product_id", "step_id", "step_name", "assigned_machine", mode="before"
+    )
     @classmethod
     def _strip(cls, v):
         s = "" if v is None else str(v)
@@ -143,14 +147,27 @@ class ProcessStepRow(_Row):
         step_id = info.data.get("step_id", "")
         return step_id
 
+
 class ProductionTargetRow(_Row):
-    product_id: str = Field(min_length=1)
-    step_id: str = Field(min_length=1)
+    # Strictly run-based: run_id is required; product_id is optional/informational.
+    run_id: str = Field(min_length=1)
+    product_id: Optional[str] = None
     target_qty: int = Field(ge=0)
 
-    @field_validator("product_id", "step_id", mode="before")
+    @field_validator("run_id", "product_id", mode="before")
     @classmethod
-    def _strip(cls, v): return str(v).strip()
+    def _strip(cls, v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+
+    @field_validator("run_id")
+    @classmethod
+    def _require_run(cls, v):
+        if not v:
+            raise ValueError("run_id is required for production_targets")
+        return v
 
     @field_validator("target_qty", mode="before")
     @classmethod
@@ -160,7 +177,9 @@ class ProductionTargetRow(_Row):
         except Exception:
             return 0
 
+
 # ---- Fact tables ------------------------------------------------------------
+
 
 class ProductionLogRow(_Row):
     # Include start/end times so Actual Gantt can render,
@@ -187,6 +206,7 @@ class ProductionLogRow(_Row):
     def _ts_optional(cls, v):
         try:
             import pandas as pd  # optional dependency; available in your env
+
             if v is None or (isinstance(v, str) and not v.strip()) or pd.isna(v):
                 return None
         except Exception:
