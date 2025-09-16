@@ -270,6 +270,27 @@ def run_multivariate_forecast(
     else:
         eff_horizon = horizon
 
+    # If user selected zero features -> simple baseline mean forecast (early return
+    if not included:
+        if eff_horizon > 0:
+            future_ds = _infer_future_index(target["ds"].max(), eff_horizon, target["ds"])
+        else:
+            future_ds = []
+        base_value = float(target["y"].mean())
+        yhat_hist = [base_value] * len(target)
+        yhat_future = [base_value] * len(future_ds)
+        combined_ds = list(target["ds"]) + future_ds
+        forecast = build_forecast_frame(
+            combined_ds,
+            yhat_hist + yhat_future,
+            model_label="mv-baseline-mean",
+            y=list(target["y"]) + [np.nan] * len(future_ds),
+        )
+        if config.require_non_negative:
+            forecast["yhat"] = forecast["yhat"].clip(lower=0.0)
+        forecast.to_csv(output_path, index=False)
+        return forecast
+
     # Feature matrix for history (no scenario overrides)
     feat_hist = _compute_feature_series(tables, target["ds"], config.agg_freq, included)
 
@@ -317,20 +338,7 @@ def run_multivariate_forecast(
 
     # Determine feature columns actually used
     feature_cols = [c for c in included if c in merged.columns]
-    if not feature_cols:  # user selected none -> baseline
-        # Fallback: persistence (mean)
-        base_value = float(target["y"].mean())
-        yhat_hist = [base_value] * len(target)
-        yhat_future = [base_value] * eff_horizon
-        combined_ds = list(target["ds"]) + future_ds
-        forecast = build_forecast_frame(
-            combined_ds,
-            yhat_hist + yhat_future,
-            model_label="mv-baseline-mean",
-            y=list(target["y"]) + [np.nan] * eff_horizon,
-        )
-        forecast.to_csv(output_path, index=False)
-        return forecast
+    # (feature_cols guaranteed non-empty here due to early return above)
 
     # Separate historical rows for fitting
     hist_mask = merged["y"].notna()

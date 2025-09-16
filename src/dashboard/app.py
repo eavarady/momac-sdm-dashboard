@@ -438,9 +438,10 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             st.warning("\n".join(f"{k}: {v}" for k, v in fe.details.items()))
             st.info("Unselect the inadequate feature(s) and re-run the forecast.")
         except Exception as e:
-            st.error(f"Multivariate forecasting failed: {e}")
             if not scenario["included_variables"]:
-                st.info("Try selecting at least one variable or reduce horizon.")
+                st.warning("Select at least one scenario variable to run a multivariate scenario.")
+            else:
+                st.error(f"Multivariate forecasting failed: {e}")
 
 
 
