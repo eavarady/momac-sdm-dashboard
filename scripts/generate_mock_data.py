@@ -55,7 +55,7 @@ def generate_mock_data(
                 random.choice(["CNC", "RobotArm", "Press"]) for _ in range(num_machines)
             ],
             "status": [
-                random.choice(["active", "maintenance", "offline"])
+                random.choice(["online", "maintenance", "offline"])
                 for _ in range(num_machines)
             ],
         }
