@@ -84,24 +84,82 @@ def build_forecast_line(
 
     fig = go.Figure()
 
-    # Interval band (must plot lower first, then upper with fill='tonexty')
+    # Masks for historical vs future
+    hist_mask = data["y"].notna() if "y" in data.columns else pd.Series([True] * len(data))
+    future_mask = (~hist_mask) if "y" in data.columns else pd.Series([False] * len(data))
+
+    # Historical actuals (before fit so they sit on top of interval later)
+    if show_history and "y" in data.columns and hist_mask.any():
+        fig.add_trace(
+            go.Scatter(
+                name="Actual",
+                x=data.loc[hist_mask, "ds"],
+                y=data.loc[hist_mask, "y"],
+                mode="lines+markers" if markers else "lines",
+                line=dict(color=colors["actual"], width=1.5),
+                marker=dict(size=5) if markers else None,
+                hovertemplate="Actual: %{y:.2f}<extra></extra>",
+            )
+        )
+
+    # In-sample fit (historical yhat) styled subtly
+    if hist_mask.any():
+        fig.add_trace(
+            go.Scatter(
+                name="In-sample Fit",
+                x=data.loc[hist_mask, "ds"],
+                y=data.loc[hist_mask, "yhat"],
+                mode="lines",
+                line=dict(color=colors["forecast"], width=1, dash="dot"),
+                opacity=0.6,
+                hoverinfo="skip",
+            )
+        )
+
+    # Future forecast line
+    if future_mask.any():
+        fig.add_trace(
+            go.Scatter(
+                name="Forecast",
+                x=data.loc[future_mask, "ds"],
+                y=data.loc[future_mask, "yhat"],
+                mode="lines",
+                line=dict(color=colors["forecast"], width=2),
+                hovertemplate="Forecast: %{y:.2f}<extra></extra>",
+            )
+        )
+    elif not hist_mask.any():  # edge case: no historical y provided
+        fig.add_trace(
+            go.Scatter(
+                name="Forecast",
+                x=data["ds"],
+                y=data["yhat"],
+                mode="lines",
+                line=dict(color=colors["forecast"], width=2),
+                hovertemplate="Forecast: %{y:.2f}<extra></extra>",
+            )
+        )
+
+    # Interval band only for future horizon
     has_bounds = show_bounds and {"yhat_lower", "yhat_upper"}.issubset(data.columns)
-    if has_bounds:
+    if has_bounds and future_mask.any():
+        fut_ds = data.loc[future_mask, "ds"].tolist()
         fig.add_trace(
             go.Scatter(
                 name="Lower Bound",
-                x=ds_py,
-                y=data["yhat_lower"],
+                x=fut_ds,
+                y=data.loc[future_mask, "yhat_lower"],
                 line=dict(width=0),
                 mode="lines",
                 showlegend=False,
+                hoverinfo="skip",
             )
         )
         fig.add_trace(
             go.Scatter(
                 name="Prediction Interval",
-                x=ds_py,
-                y=data["yhat_upper"],
+                x=fut_ds,
+                y=data.loc[future_mask, "yhat_upper"],
                 line=dict(width=0),
                 mode="lines",
                 fill="tonexty",
@@ -111,58 +169,30 @@ def build_forecast_line(
             )
         )
 
-    # Forecast line
-    fig.add_trace(
-        go.Scatter(
-            name="Forecast",
-            x=ds_py,
-            y=data["yhat"],
-            mode="lines",
-            line=dict(color=colors["forecast"], width=2),
-        )
-    )
-
-    # Historical actuals
-    if show_history and "y" in data.columns:
-        fig.add_trace(
-            go.Scatter(
-                name="Actual",
-                x=ds_py,
-                y=data["y"],
-                mode="lines+markers" if markers else "lines",
-                line=dict(color=colors["actual"], width=1.5),
-                marker=dict(size=5) if markers else None,
-            )
-        )
-
     # Vertical separator at last actual point (custom shape to avoid add_vline Timestamp arithmetic)
-    if "y" in data.columns:
-        hist_mask = data["y"].notna()
-        if hist_mask.any() and hist_mask.sum() < len(data):
-            last_hist_time = data.loc[hist_mask, "ds"].max()
-            # Add a vertical line shape
-            fig.add_shape(
-                type="line",
-                x0=last_hist_time,
-                x1=last_hist_time,
-                y0=0,
-                y1=1,
-                xref="x",
-                yref="paper",
-                line=dict(color="#555", width=1, dash="dot"),
-            )
-            # Add annotation near the top
-            fig.add_annotation(
-                x=last_hist_time,
-                y=1,
-                xref="x",
-                yref="paper",
-                text="Forecast start",
-                showarrow=False,
-                xanchor="left",
-                yanchor="bottom",
-                font=dict(size=10, color="#555"),
-            )
+    if "y" in data.columns and hist_mask.any() and future_mask.any():
+        last_hist_time = data.loc[hist_mask, "ds"].max()
+        fig.add_shape(
+            type="line",
+            x0=last_hist_time,
+            x1=last_hist_time,
+            y0=0,
+            y1=1,
+            xref="x",
+            yref="paper",
+            line=dict(color="#555", width=1, dash="dot"),
+        )
+        fig.add_annotation(
+            x=last_hist_time,
+            y=1,
+            xref="x",
+            yref="paper",
+            text="Forecast start",
+            showarrow=False,
+            xanchor="left",
+            yanchor="bottom",
+            font=dict(size=10, color="#555"),
+        )
 
     model_label = None
     if "model" in data.columns:
@@ -182,6 +212,8 @@ def build_forecast_line(
         legend=dict(orientation="h", y=1.02, x=0),
         margin=dict(l=40, r=20, t=60, b=40),
         hovermode="x unified",
+        hoverdistance=1,  # tighten so boundary shows both only when exactly aligned
+        spikedistance=1,
     )
     fig.update_xaxes(title="Date", showgrid=True, gridcolor="rgba(0,0,0,0.05)")
     fig.update_yaxes(title="Value", showgrid=True, gridcolor="rgba(0,0,0,0.05)")

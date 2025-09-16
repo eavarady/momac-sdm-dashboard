@@ -17,6 +17,7 @@ from kpi.progress import per_step_progress, overall_progress_by_product
 from ml.time_series import time_series_forecast
 from visualizations.line_chart import build_forecast_line
 from ml.linear_forecast import linear_forecast
+from ml.multivariate_forecast import run_multivariate_forecast, ForecastFeatureAdequacyError
 
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
@@ -468,17 +469,29 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             fk = FEATURE_LABELS["Defect rate %"]
             scenario["included_variables"].append(fk)
             scenario["assumptions"][fk] = defect_rate_pct
-        st.success("Scenario configured (no model applied yet).")
-        st.json(scenario)
-        st.info(
-            "Model training & multivariate prediction not yet implemented. This UI is a placeholder. Only the listed included_variables will become features when the model layer is added."
-        )
-        if scenario["included_variables"]:
-            st.caption("Feature set preview: time_index + " + ", ".join(scenario["included_variables"]))
-        else:
-            st.warning("No variables selected. Only a time trend would be available for modeling.")
-        # Persist in session_state so future model layer can consume without rewiring UI
         st.session_state["multivariate_scenario"] = scenario
+        try:
+            mv_path = "multivariate_forecasted_data.csv"
+            fc_mv = run_multivariate_forecast(_tables, scenario, output_path=mv_path)
+            st.success("Multivariate forecast generated.")
+            from visualizations.line_chart import build_forecast_line as _bfl
+            fig_mv = _bfl(fc_mv)
+            Y_AXIS_TITLES = {
+                "mean": "Average Cycle Time (hrs)",
+                "median": "Typical Cycle Time (hrs)",
+                "sum": "Total Processing Hours (hrs)",
+                "count": "Completed Runs (count)",
+            }
+            fig_mv.update_yaxes(title=Y_AXIS_TITLES.get(mv_agg_metric, "Value"))
+            st.plotly_chart(fig_mv, use_container_width=True)
+        except ForecastFeatureAdequacyError as fe:
+            st.error("One or more selected features are not adequate for modeling.")
+            st.warning("\n".join(f"{k}: {v}" for k, v in fe.details.items()))
+            st.info("Unselect the inadequate feature(s) and re-run the forecast.")
+        except Exception as e:
+            st.error(f"Multivariate forecasting failed: {e}")
+            if not scenario["included_variables"]:
+                st.info("Try selecting at least one variable or reduce horizon.")
 
 
 
