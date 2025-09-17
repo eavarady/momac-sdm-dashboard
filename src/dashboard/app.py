@@ -533,8 +533,22 @@ spr = per_run_progress(
 overall = overall_progress_by_product(sp)
 
 st.subheader("Progress")
+# Per-run progress bars, current runs only (Not 100%), sorted by run_id
+st.subheader("Current Runs Progress")
+if not spr.empty:
+    current_runs = spr[spr["progress"] < 1.0].sort_values("run_id")
+    if current_runs.empty:
+        st.info("No current runs in progress (all runs complete).")
+    else:
+        for _, row in current_runs.iterrows():
+            pct = float(row["progress"])
+            st.write(f"**{row['run_id']}** — {pct:.0%}")
+            st.progress(max(0.0, min(1.0, pct)))
 
-# Overall progress per product
+# Separator
+st.markdown("---")
+# Overall progress per product bars
+st.subheader("Overall Progress by Product")
 if not overall.empty:
     for _, row in overall.sort_values("product_id").iterrows():
         pct = float(row["overall_progress"])
@@ -543,6 +557,9 @@ if not overall.empty:
 else:
     st.info("No overall progress available (check data or filters).")
 
+
+# Separator
+st.markdown("---")
 # Per-run progress table
 st.subheader("Per-Run Progress")
 if not spr.empty:
