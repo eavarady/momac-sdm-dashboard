@@ -462,6 +462,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             # Influence diagnostics
             try:
                 import json
+
                 meta_path = os.path.splitext(mv_path)[0] + "_meta.json"
                 if os.path.exists(meta_path):
                     with open(meta_path, "r", encoding="utf-8") as fh:
@@ -517,10 +518,35 @@ step_names = None
 if not steps.empty and {"step_id", "step_name"}.issubset(steps.columns):
     step_names = steps[["step_id", "step_name"]].drop_duplicates().copy()
 
+# View toggle controls
+col_g1, col_g2 = st.columns(2)
+with col_g1:
+    # Default: by run if run_id present, else by step
+    has_run = (not prod.empty) and ("run_id" in prod.columns)
+    view_actual_label = st.radio(
+        "Actual Gantt view",
+        ["By run", "By step"],
+        index=(0 if has_run else 1),
+        key="gantt_actual_view",
+        horizontal=True,
+    )
+    view_actual = "by_run" if view_actual_label == "By run" else "by_step"
+with col_g2:
+    has_runs_for_planned = (not prod.empty) and ("run_id" in prod.columns)
+    view_planned_label = st.radio(
+        "Planned Gantt view",
+        ["By run", "By step"],
+        index=(0 if has_runs_for_planned else 1),
+        key="gantt_planned_view",
+        horizontal=True,
+    )
+    view_planned = "by_run" if view_planned_label == "By run" else "by_step"
+
 fig_actual = chart.actual_gantt(
     prod,
     product_names=product_names,
     step_names=step_names,
+    view=view_actual,
 )
 if fig_actual is not None:
     st.plotly_chart(fig_actual, width="stretch")
@@ -532,6 +558,7 @@ fig_planned = chart.planned_gantt(
     production_log=prod,  # enables optional run-based anchoring if desired
     product_names=product_names,
     anchor="run_start",  # anchor planned bars at earliest start_time per (product_id, run_id)
+    view=view_planned,
 )
 if fig_planned is not None:
     st.plotly_chart(fig_planned, width="stretch")

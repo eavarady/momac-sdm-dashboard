@@ -32,6 +32,7 @@ class GanttChart:
         production_log: pd.DataFrame,
         product_names: Optional[pd.DataFrame | Mapping[str, str]] = None,
         step_names: Optional[pd.DataFrame | Mapping[str, str]] = None,
+        view: Optional[Literal["by_run", "by_step"]] = None,
     ) -> Optional["px.Figure"]:
         """Actual Gantt using start_time/end_time from production_log.
 
@@ -99,8 +100,13 @@ class GanttChart:
         if df.empty:
             return None
 
+        # Determine desired view
+        desired = view
+        if desired is None:
+            desired = "by_run" if "run_id" in df.columns else "by_step"
+
         # Group; include run_id when available
-        if "run_id" in df.columns:
+        if desired == "by_run" and "run_id" in df.columns:
             agg = (
                 df.groupby(
                     ["product_id", "product_label", "run_id", "step_id", "status"],
@@ -123,15 +129,14 @@ class GanttChart:
                 agg = agg.merge(
                     names, on=["product_id", "run_id", "step_id"], how="left"
                 )
-            step_label = agg.get("step_name", agg.get("step_id")).astype(str)
+
+            # Per-run Y-axis label: one row per (product, run)
             run_label = "(" + agg["run_id"].astype(str) + ")"
-            agg["task"] = (
-                agg["product_label"].astype(str)
-                + " . "
-                + run_label
-                + " . "
-                + step_label
-            )
+            agg["y_label"] = agg["product_label"].astype(str) + " . " + run_label
+
+            # Color by step (name preferred)
+            color_col = "step_name" if "step_name" in agg.columns else "step_id"
+
             hover_cols = [
                 c
                 for c in [
@@ -144,6 +149,18 @@ class GanttChart:
                 ]
                 if c in agg.columns
             ]
+
+            fig = px.timeline(
+                agg,
+                x_start="start_time",
+                x_end="end_time",
+                y="y_label",
+                color=color_col,
+                hover_data=hover_cols,
+                title="Actual Gantt (by run)",
+            )
+            fig.update_yaxes(autorange="reversed")
+            return fig
         else:
             agg = (
                 df.groupby(
@@ -194,6 +211,7 @@ class GanttChart:
         production_log: Optional[pd.DataFrame] = None,
         anchor: Literal["now", "run_start"] = "now",
         product_names: Optional[pd.DataFrame | Mapping[str, str]] = None,
+        view: Optional[Literal["by_run", "by_step"]] = None,
     ) -> Optional["px.Figure"]:
         """Planned Gantt using dependency DAG and estimated_time (hours).
 
@@ -290,6 +308,7 @@ class GanttChart:
             )
             step_label = planned.get("step_name", planned.get("step_id")).astype(str)
             run_label = "(" + planned["run_id"].astype(str) + ")"
+            # Build step-level task label (for by-step view)
             planned["task"] = (
                 planned["product_label"].astype(str)
                 + " . "
@@ -297,6 +316,7 @@ class GanttChart:
                 + " . "
                 + step_label
             )
+            # Default color for by-step: run_id; for by-run we will color by step
             color_col = "run_id"
             hover_cols = [
                 c
@@ -309,6 +329,18 @@ class GanttChart:
                 ]
                 if c in planned.columns
             ]
+            # Decide Y-axis based on view
+            desired = view or "by_step"
+            if desired == "by_run":
+                planned["y_label"] = (
+                    planned["product_label"].astype(str) + " . " + run_label
+                )
+                y_col = "y_label"
+                color_col = "step_name" if "step_name" in planned.columns else "step_id"
+                title = "Planned Gantt (by run)"
+            else:
+                y_col = "task"
+                title = "Planned Gantt (by step)"
         else:
             base = self._now_utc()
             merged["start_time"] = base + pd.to_timedelta(
@@ -333,6 +365,8 @@ class GanttChart:
                 ]
                 if c in planned.columns
             ]
+            y_col = "task"
+            title = "Planned Gantt (DAG-derived)"
 
         planned = planned.dropna(subset=["start_time", "end_time"])
         if planned.empty:
@@ -342,14 +376,10 @@ class GanttChart:
             planned,
             x_start="start_time",
             x_end="end_time",
-            y="task",
+            y=y_col,
             color=color_col,
             hover_data=hover_cols,
-            title=(
-                "Planned Gantt (DAG-derived)"
-                if anchor == "now"
-                else "Planned Gantt by Run (DAG-derived)"
-            ),
+            title=title,
         )
         fig.update_yaxes(autorange="reversed")
         return fig

@@ -35,6 +35,26 @@ class MachineRow(_Row):
     def _strip(cls, v):
         return str(v).strip()
 
+    @field_validator("status", mode="before")
+    @classmethod
+    def _status_norm(cls, v):
+        s = str(v).strip().lower()
+        # Allow a few common synonyms
+        synonyms = {
+            "active": "online",
+            "up": "online",
+            "running": "online",
+            "on": "online",
+            "inactive": "offline",
+            "down": "offline",
+            "off": "offline",
+        }
+        s = synonyms.get(s, s)
+        allowed = {"online", "offline", "maintenance"}
+        if s not in allowed:
+            raise ValueError("Input should be 'online', 'offline' or 'maintenance'")
+        return s
+
 
 class ProductionLineRow(_Row):
     line_id: str = Field(min_length=1)
