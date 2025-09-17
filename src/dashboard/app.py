@@ -570,10 +570,24 @@ else:
 
 st.subheader("Time per Step")
 plog = _tables.get("production_log", pd.DataFrame())
+
+# Optional date range filter on start_time
+col_dr1, col_dr2, col_dr3 = st.columns([1, 1, 2])
+with col_dr1:
+    date_start = st.date_input("From date", value=None, key="tps_from")
+with col_dr2:
+    date_end = st.date_input("To date", value=None, key="tps_to")
+
+# Normalize to string for KPI (None if not set)
+ds_val = pd.Timestamp(date_start).isoformat() if date_start else None
+de_val = pd.Timestamp(date_end).isoformat() if date_end else None
+
 agg = compute_time_per_step(
     plog,
     process_steps=_tables.get("process_steps", pd.DataFrame()),
     products=_tables.get("products", pd.DataFrame()),
+    date_start=ds_val,
+    date_end=de_val,
 )
 if agg.empty:
     st.info("Insufficient data to compute time-per-step (need completed events).")
@@ -598,16 +612,57 @@ else:
         )
         st.dataframe(
             display_df[
-                ["product_label", "step_label", "avg_duration_hours", "events"]
+                [
+                    "product_label",
+                    "step_label",
+                    "avg_duration_hours",
+                    "median_duration_hours",
+                    "std_duration_hours",
+                    "events",
+                ]
             ].rename(
                 columns={
                     "product_label": "Product",
                     "step_label": "Step",
                     "avg_duration_hours": "Avg Duration (hrs)",
+                    "median_duration_hours": "Median (hrs)",
+                    "std_duration_hours": "Std Dev (hrs)",
                     "events": "Completed Events",
                 }
             ),
             use_container_width=True,
+        )
+
+        # CSV export
+        @st.cache_data
+        def _to_csv(df: pd.DataFrame) -> bytes:
+            return df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="Download CSV",
+            data=_to_csv(
+                display_df[
+                    [
+                        "product_label",
+                        "step_label",
+                        "avg_duration_hours",
+                        "median_duration_hours",
+                        "std_duration_hours",
+                        "events",
+                    ]
+                ].rename(
+                    columns={
+                        "product_label": "Product",
+                        "step_label": "Step",
+                        "avg_duration_hours": "Avg Duration (hrs)",
+                        "median_duration_hours": "Median (hrs)",
+                        "std_duration_hours": "Std Dev (hrs)",
+                        "events": "Completed Events",
+                    }
+                )
+            ),
+            file_name="time_per_step.csv",
+            mime="text/csv",
         )
     with col_tp2:
         if selected_product != "All":
