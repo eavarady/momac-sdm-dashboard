@@ -45,16 +45,16 @@ Note
 
 ## Production Targets (Optional)
 
-In addition to CSV/Excel/Sheets input for core tables, you may provide an optional production_targets table.
+In addition to CSV/Excel/Sheets input for core tables, you should provide a runs table (runs.csv) with planned_qty per run.
 This defines target output quantities per step, enabling progress bars to be measured against planned goals rather than only actual activity.
 
 Schema:
 	•	product_id – links to products table
 	•	step_id – links to process_steps table
-	•	target_qty – positive integer quantity goal
+	•	planned_qty – positive integer quantity goal
 
 Behavior:
-	•	If production_targets is present, progress for each step is calculated as completed_qty / target_qty (clipped to 100%).
+	•	Per-step progress is calculated from events; per-run quantity progress uses qty_out at terminal steps divided by planned_qty (clipped to 100%).
 	•	If absent, the system falls back to the default ratio completed_qty / (completed_qty + in_progress_qty).
 	•	Validation ensures all (product_id, step_id) pairs referenced in targets exist in process_steps.
 

@@ -19,7 +19,6 @@ def _normalize_status_col(df: pd.DataFrame) -> pd.DataFrame:
 def per_step_progress(
     process_steps: pd.DataFrame,
     production_log: pd.DataFrame,
-    targets: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Compute per-step progress as quantity-complete / (quantity-complete + quantity-in_progress).
@@ -78,23 +77,10 @@ def per_step_progress(
         merged.loc[nonzero, "complete_qty"] / denom.loc[nonzero]
     ).clip(0, 1)
 
-    if targets is not None and not targets.empty:
-        if {"product_id", "step_id", "target_qty"}.issubset(targets.columns):
-            t = targets[["product_id", "step_id", "target_qty"]].copy()
-            t["target_qty"] = pd.to_numeric(t["target_qty"], errors="coerce").fillna(0)
-            merged = merged.merge(t, on=["product_id", "step_id"], how="left")
-            has_target = merged["target_qty"].fillna(0) > 0
-            merged.loc[has_target, "progress"] = (
-                merged.loc[has_target, "complete_qty"]
-                / merged.loc[has_target, "target_qty"]
-            ).clip(0, 1)
-
     ordered_cols = ["product_id", "step_id"]
     if "step_name" in merged.columns:
         ordered_cols.append("step_name")
     cols_tail = ["complete_qty", "in_progress_qty"]
-    if "target_qty" in merged.columns:
-        cols_tail.append("target_qty")
     cols_tail.append("progress")
     ordered_cols += cols_tail
     return merged.loc[:, [c for c in ordered_cols if c in merged.columns]]
@@ -125,7 +111,6 @@ def overall_progress_by_product(step_progress: pd.DataFrame) -> pd.DataFrame:
 def per_run_progress(
     process_steps: pd.DataFrame,
     production_log: pd.DataFrame,
-    targets: pd.DataFrame | None = None,
     runs: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
@@ -197,14 +182,6 @@ def per_run_progress(
         and {"run_id", "planned_qty"}.issubset(runs.columns)
     ):
         planned = runs[["run_id", "planned_qty", "execution_mode"]].copy()
-    elif (
-        targets is not None
-        and not targets.empty
-        and {"run_id", "target_qty"}.issubset(targets.columns)
-    ):
-        planned = targets[["run_id", "target_qty"]].rename(
-            columns={"target_qty": "planned_qty"}
-        )
 
     base = per_run_step.merge(qty_out, on=["product_id", "run_id"], how="left")
     base["qty_out"] = pd.to_numeric(base.get("qty_out", 0), errors="coerce").fillna(0)

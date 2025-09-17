@@ -60,8 +60,8 @@ def read_csv_tables() -> Dict[str, pd.DataFrame]:
         "production_log",
         "machine_metrics",
         "quality_checks",
+        # Canonical run metadata
         "runs",
-        "production_targets",
     ]:
         path = DATA_DIR / f"{name}.csv"
         if path.exists():
@@ -95,8 +95,6 @@ def read_csv_tables() -> Dict[str, pd.DataFrame]:
                     df = _normalize_dimension_table(
                         df, ["operator_id", "name", "role"], pk="operator_id"
                     )
-                elif name == "production_targets":
-                    df = validate_dataframe(raw, "production_targets")
                 elif name == "runs":
                     df = validate_dataframe(raw, "runs")
 
@@ -124,34 +122,18 @@ def read_csv_tables() -> Dict[str, pd.DataFrame]:
             }
             tables[name] = pd.DataFrame()
 
-    # Ensure a 'runs' view exists: prefer explicit runs.csv; else derive from production_targets
-    try:
-        if "runs" not in tables or tables["runs"].empty:
-            pt = tables.get("production_targets", pd.DataFrame())
-            if not pt.empty and {"run_id", "target_qty"}.issubset(pt.columns):
-                runs = pt.rename(columns={"target_qty": "planned_qty"}).copy()
-                runs["planned_qty"] = (
-                    pd.to_numeric(runs["planned_qty"], errors="coerce")
-                    .fillna(0)
-                    .astype(int)
-                )
-                runs["execution_mode"] = runs["planned_qty"].apply(
-                    lambda x: "unit" if int(x) == 1 else "batch"
-                )
-                tables["runs"] = runs
-        else:
-            df = tables["runs"].copy()
-            df["planned_qty"] = (
-                pd.to_numeric(df.get("planned_qty", 0), errors="coerce")
-                .fillna(0)
-                .astype(int)
-            )
-            df["execution_mode"] = df["planned_qty"].apply(
-                lambda x: "unit" if int(x) == 1 else "batch"
-            )
-            tables["runs"] = df
-    except Exception:
-        pass
+    # Compute execution_mode on runs (unit vs batch) if runs present
+    if "runs" in tables and not tables["runs"].empty:
+        df = tables["runs"].copy()
+        df["planned_qty"] = (
+            pd.to_numeric(df.get("planned_qty", 0), errors="coerce")
+            .fillna(0)
+            .astype(int)
+        )
+        df["execution_mode"] = df["planned_qty"].apply(
+            lambda x: "unit" if int(x) == 1 else "batch"
+        )
+        tables["runs"] = df
 
     # Cross-table validation (unique keys, foreign keys, workflow deps)
     fk_errs = check_uniques_and_fks(tables)

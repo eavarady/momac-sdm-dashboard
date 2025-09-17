@@ -181,11 +181,9 @@ def generate_mock_data(
                 ]
             )
         )
-        # Write preferred runs.csv
-        runs_out = runs_df.rename(columns={"target_qty": "planned_qty"})
-        runs_out.to_csv(DATA / "runs.csv", index=False)
-        # Write legacy production_targets.csv for backward compatibility
-        runs_df.to_csv(DATA / "production_targets.csv", index=False)
+    # Write preferred runs.csv only (runs-only model)
+    runs_out = runs_df.rename(columns={"target_qty": "planned_qty"})
+    runs_out.to_csv(DATA / "runs.csv", index=False)
 
     # Machine Metrics (ISO timestamps)
     metrics_rows = []

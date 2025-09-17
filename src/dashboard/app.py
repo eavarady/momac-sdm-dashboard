@@ -492,7 +492,6 @@ chart = GanttChart()
 prod = _tables.get("production_log", pd.DataFrame())
 steps = _tables.get("process_steps", pd.DataFrame())
 products = _tables.get("products", pd.DataFrame())
-targets = _tables.get("production_targets", pd.DataFrame())
 
 # Optional name mappings
 product_names = None
@@ -525,11 +524,10 @@ else:
     st.info("Planned Gantt unavailable (needs process_steps with estimated_time).")
 
 
-sp = per_step_progress(steps, prod, targets=targets if not targets.empty else None)
+sp = per_step_progress(steps, prod)
 spr = per_run_progress(
     steps,
     prod,
-    targets=targets if not targets.empty else None,
     runs=_tables.get("runs", pd.DataFrame()),
 )
 overall = overall_progress_by_product(sp)

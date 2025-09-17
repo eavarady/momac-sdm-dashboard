@@ -31,78 +31,104 @@ class MachineRow(_Row):
     status: Literal["online", "offline", "maintenance"]
 
     @field_validator("machine_id", "line_id", "type", mode="before")
-    @classmethod
-    def _strip(cls, v):
-        return str(v).strip()
+    class ProductionLineRow(_Row):
+        line_id: str = Field(min_length=1)
+        name: str = Field(min_length=1)
+        shift: str = Field(min_length=1)
 
-    @field_validator("status", mode="before")
-    @classmethod
-    def _status_norm(cls, v):
-        s = str(v).strip().lower()
-        allowed = {"online", "offline", "maintenance"}
-        if s not in allowed:
-            raise ValueError(
-                f"invalid status '{s}' (allowed: online, offline, maintenance)"
-            )
-        return s
+        @field_validator("line_id", "name", "shift", mode="before")
+        @classmethod
+        def _strip(cls, v):
+            return str(v).strip()
 
+    class ProductRow(_Row):
+        product_id: str = Field(min_length=1)
+        name: str = Field(min_length=1)
+        category: str = Field(default="")
+        spec_version: str = Field(default="")
 
-class ProductionLineRow(_Row):
-    line_id: str = Field(min_length=1)
-    name: str = Field(min_length=1)
-    shift: str = Field(min_length=1)
+        @field_validator(
+            "product_id", "name", "category", "spec_version", mode="before"
+        )
+        @classmethod
+        def _strip(cls, v):
+            return str(v).strip()
 
-    @field_validator("line_id", "name", "shift", mode="before")
-    @classmethod
-    def _strip(cls, v):
-        return str(v).strip()
+    class OperatorRow(_Row):
+        operator_id: str = Field(min_length=1)
+        name: str = Field(min_length=1)
+        role: str = Field(default="")
 
+        @field_validator("operator_id", "name", "role", mode="before")
+        @classmethod
+        def _strip(cls, v):
+            return str(v).strip()
 
-class ProductRow(_Row):
-    product_id: str = Field(min_length=1)
-    name: str = Field(min_length=1)
-    category: str = Field(default="")
-    spec_version: str = Field(default="")
+    # ---- Process steps ----------------------------------------------------------
 
-    @field_validator("product_id", "name", "category", "spec_version", mode="before")
-    @classmethod
-    def _strip(cls, v):
-        return str(v).strip()
+    class ProcessStepRow(_Row):
+        product_id: str = Field(min_length=1)
+        step_id: str = Field(min_length=1)
+        step_name: str = Field(default="")
+        assigned_machine: str = Field(default="")
+        assigned_operators: List[str] = Field(default_factory=list)
+        estimated_time: int = Field(ge=0, default=0)
+        dependency_step_id: Optional[str] = None
 
+        @field_validator(
+            "product_id", "step_id", "step_name", "assigned_machine", mode="before"
+        )
+        @classmethod
+        def _strip(cls, v):
+            s = "" if v is None else str(v)
+            return s.strip()
 
-class OperatorRow(_Row):
-    operator_id: str = Field(min_length=1)
-    name: str = Field(min_length=1)
-    role: str = Field(default="")
+        @field_validator("assigned_operators", mode="before")
+        @classmethod
+        def _ops_parse(cls, v):
+            if v is None:
+                return []
+            if isinstance(v, list):
+                items = v
+            else:
+                items = str(v).split(",")
+            out: list[str] = []
+            for it in items:
+                it = str(it).strip()
+                if it and it not in out:
+                    out.append(it)
+            return out
 
-    @field_validator("operator_id", "name", "role", mode="before")
-    @classmethod
-    def _strip(cls, v):
-        return str(v).strip()
+        @field_validator("estimated_time", mode="before")
+        @classmethod
+        def _et_int(cls, v):
+            if v is None:
+                return 0
+            try:
+                iv = int(float(v))
+                return max(0, iv)
+            except Exception:
+                return 0
 
+        @field_validator("dependency_step_id", mode="before")
+        @classmethod
+        def _dep_norm(cls, v):
+            if v is None:
+                return None
+            s = str(v).strip()
+            # treat common sentinels as empty
+            if s == "" or s.lower() in {"nan", "none"}:
+                return None
+            return s
 
-# ---- Process steps ----------------------------------------------------------
+        @field_validator("step_name")
+        @classmethod
+        def _fallback_name(cls, v, info):
+            if v:
+                return v
+            step_id = info.data.get("step_id", "")
+            return step_id
 
-
-class ProcessStepRow(_Row):
-    product_id: str = Field(min_length=1)
-    step_id: str = Field(min_length=1)
-    step_name: str = Field(default="")
-    assigned_machine: str = Field(default="")
-    assigned_operators: List[str] = Field(default_factory=list)
-    estimated_time: int = Field(ge=0, default=0)
-    dependency_step_id: Optional[str] = None
-
-    @field_validator(
-        "product_id", "step_id", "step_name", "assigned_machine", mode="before"
-    )
-    @classmethod
-    def _strip(cls, v):
-        s = "" if v is None else str(v)
-        return s.strip()
-
-    @field_validator("assigned_operators", mode="before")
-    @classmethod
     def _ops_parse(cls, v):
         if v is None:
             return []
@@ -148,34 +174,7 @@ class ProcessStepRow(_Row):
         return step_id
 
 
-class ProductionTargetRow(_Row):
-    # Strictly run-based: run_id is required; product_id is optional/informational.
-    run_id: str = Field(min_length=1)
-    product_id: Optional[str] = None
-    target_qty: int = Field(ge=0)
-
-    @field_validator("run_id", "product_id", mode="before")
-    @classmethod
-    def _strip(cls, v):
-        if v is None:
-            return None
-        s = str(v).strip()
-        return s or None
-
-    @field_validator("run_id")
-    @classmethod
-    def _require_run(cls, v):
-        if not v:
-            raise ValueError("run_id is required for production_targets")
-        return v
-
-    @field_validator("target_qty", mode="before")
-    @classmethod
-    def _to_int(cls, v):
-        try:
-            return max(0, int(float(v)))
-        except Exception:
-            return 0
+# ProductionTargetRow removed – replaced by runs-only model
 
 
 # ---- Fact tables ------------------------------------------------------------
