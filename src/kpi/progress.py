@@ -118,7 +118,7 @@ def per_run_progress(
     Returns one row per run with:
       - progress_qty: qty_out(run)/planned_qty using terminal steps (clip 0..1)
       - progress_steps: steps_completed/total_steps
-      - progress: alias of progress_qty if planned_qty>0 else progress_steps
+      - progress: for planned runs, use progress_qty if planned_qty > 1, else progress_steps (unit runs)
       - planned_qty (from runs/targets) and optional execution_mode
     """
     if production_log.empty or process_steps.empty:
@@ -137,6 +137,73 @@ def per_run_progress(
     log = _normalize_status_col(production_log.copy())
     log["quantity"] = pd.to_numeric(log.get("quantity", 0), errors="coerce").fillna(0)
 
+    # Step universe and totals per product (fixed denominator)
+    steps_pp = process_steps[["product_id", "step_id"]].drop_duplicates()
+    totals = (
+        steps_pp.groupby("product_id", as_index=False)["step_id"]
+        .nunique()
+        .rename(columns={"step_id": "total_steps"})
+    )
+
+    # Run keys we care about (from log; optionally union runs table if product_id present)
+    run_keys = (
+        log[["product_id", "run_id"]].dropna(subset=["run_id"]).drop_duplicates().copy()
+    )
+    if runs is not None and not runs.empty and "product_id" in runs.columns:
+        rk = (
+            runs[["product_id", "run_id"]]
+            .dropna(subset=["product_id", "run_id"])
+            .drop_duplicates()
+        )
+        if not rk.empty:
+            run_keys = (
+                pd.concat([run_keys, rk], ignore_index=True)
+                .drop_duplicates()
+                .reset_index(drop=True)
+            )
+
+    if run_keys.empty:
+        return pd.DataFrame(
+            columns=[
+                "product_id",
+                "run_id",
+                "planned_qty",
+                "execution_mode",
+                "progress_qty",
+                "progress_steps",
+                "progress",
+            ]
+        )
+
+    # Completed steps per run (numerator)
+    completed = (
+        log.loc[log["status"] == "complete"]
+        .dropna(subset=["run_id"])
+        .groupby(["product_id", "run_id", "step_id"], as_index=False)["quantity"]
+        .sum()
+    )
+    completed["done"] = (completed["quantity"] > 0).astype(int)
+    steps_completed = (
+        completed.groupby(["product_id", "run_id"], as_index=False)["done"]
+        .sum()
+        .rename(columns={"done": "steps_completed"})
+    )
+
+    # progress_steps = steps_completed / total_steps (clip 0..1)
+    per_run_step = run_keys.merge(
+        steps_completed, on=["product_id", "run_id"], how="left"
+    ).merge(totals, on="product_id", how="left")
+    per_run_step["steps_completed"] = per_run_step["steps_completed"].fillna(0)
+    per_run_step["total_steps"] = pd.to_numeric(
+        per_run_step["total_steps"], errors="coerce"
+    ).fillna(0)
+    per_run_step["progress_steps"] = 0.0
+    valid_den = per_run_step["total_steps"] > 0
+    per_run_step.loc[valid_den, "progress_steps"] = (
+        per_run_step.loc[valid_den, "steps_completed"]
+        / per_run_step.loc[valid_den, "total_steps"]
+    ).clip(0, 1)
+
     # Determine terminal steps per product (no dependents)
     steps = process_steps[["product_id", "step_id", "dependency_step_id"]].copy()
     dependents = steps.dropna(subset=["dependency_step_id"])[
@@ -144,7 +211,7 @@ def per_run_progress(
     ].astype(str)
     steps["is_terminal"] = ~steps["step_id"].astype(str).isin(dependents.astype(str))
 
-    # Completed quantity at terminal steps per run
+    # Completed output qty at terminal steps per run
     term = steps.loc[steps["is_terminal"], ["product_id", "step_id"]]
     log_c = log[log["status"] == "complete"]
     qty_out = (
@@ -154,54 +221,53 @@ def per_run_progress(
         .rename(columns={"quantity": "qty_out"})
     )
 
-    # Steps completion progress per run: cross with all steps to include unstarted
-    all_steps = process_steps[["product_id", "step_id"]].drop_duplicates()
-    step_done = (
-        log[log["status"] == "complete"]
-        .groupby(["product_id", "run_id", "step_id"], as_index=False)["quantity"]
-        .sum()
+    base = (
+        per_run_step.merge(qty_out, on=["product_id", "run_id"], how="left")
+        .rename(columns={"qty_out": "qty_out"})
+        .copy()
     )
-    step_done["done"] = (step_done["quantity"] > 0).astype(int)
-    per_run_step = (
-        all_steps.merge(
-            step_done[["product_id", "run_id", "step_id", "done"]],
-            on=["product_id", "step_id"],
-            how="left",
-        )
-        .assign(done=lambda d: d["done"].fillna(0))
-        .groupby(["product_id", "run_id"], as_index=False)["done"]
-        .mean()
-        .rename(columns={"done": "progress_steps"})
-    )
+    base["qty_out"] = pd.to_numeric(base.get("qty_out", 0), errors="coerce").fillna(0)
 
-    # Planned quantity
+    # Planned quantity (optional)
     planned = None
     if (
         runs is not None
         and not runs.empty
         and {"run_id", "planned_qty"}.issubset(runs.columns)
     ):
-        planned = runs[["run_id", "planned_qty", "execution_mode"]].copy()
-
-    base = per_run_step.merge(qty_out, on=["product_id", "run_id"], how="left")
-    base["qty_out"] = pd.to_numeric(base.get("qty_out", 0), errors="coerce").fillna(0)
+        cols = ["run_id", "planned_qty"]
+        if "execution_mode" in runs.columns:
+            cols.append("execution_mode")
+        planned = runs[cols].copy()
 
     if planned is not None:
         base = base.merge(planned, on="run_id", how="left")
         base["planned_qty"] = pd.to_numeric(
             base.get("planned_qty", 0), errors="coerce"
         ).fillna(0)
+
         has_plan = base["planned_qty"] > 0
-        base["progress_qty"] = 0.0
+        base["progress_qty"] = None
         base.loc[has_plan, "progress_qty"] = (
             base.loc[has_plan, "qty_out"] / base.loc[has_plan, "planned_qty"]
         ).clip(0, 1)
-        base["progress"] = (
-            base["progress_qty"].fillna(base["progress_steps"]).clip(0, 1)
-        )
+
+        # Default to step-based; for batch runs (planned_qty > 1), use qty-based
+        base["progress_steps"] = base["progress_steps"].clip(0, 1)
+        base["progress"] = base["progress_steps"]
+        use_qty = base["planned_qty"] > 1
+        base.loc[use_qty & base["progress_qty"].notna(), "progress"] = base.loc[
+            use_qty & base["progress_qty"].notna(), "progress_qty"
+        ]
+
+        # If qty indicates completion, force progress to 1.0 regardless of mode
+        qty_done = base["progress_qty"].fillna(0) >= 1.0
+        base.loc[qty_done, "progress"] = 1.0
+        base["progress"] = base["progress"].clip(0, 1)
     else:
         base["planned_qty"] = 0
-        base["execution_mode"] = None
+        if "execution_mode" not in base.columns:
+            base["execution_mode"] = None
         base["progress_qty"] = None
         base["progress"] = base["progress_steps"].clip(0, 1)
 
