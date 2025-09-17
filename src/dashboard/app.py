@@ -4,6 +4,7 @@ os.environ.setdefault("PANDAS_USE_BOTTLENECK", "0")
 
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 from adapters.csv_adapter import read_csv_tables, get_last_load_stats
 from adapters.sheets_adapter import read_sheets
 from adapters.excel_adapter import (
@@ -565,6 +566,122 @@ if fig_planned is not None:
 else:
     st.info("Planned Gantt unavailable (needs process_steps with estimated_time).")
 
+
+# Time per Step (average duration per product & step)
+st.subheader("Time per Step")
+plog = _tables.get("production_log", pd.DataFrame())
+if plog.empty or not {
+    "start_time",
+    "end_time",
+    "status",
+    "product_id",
+    "step_id",
+}.issubset(plog.columns):
+    st.info("Insufficient data to compute time-per-step (need completed events).")
+else:
+    _tps = plog.copy()
+    _tps["start_time"] = pd.to_datetime(_tps["start_time"], utc=True, errors="coerce")
+    _tps["end_time"] = pd.to_datetime(_tps.get("end_time"), utc=True, errors="coerce")
+    _tps = _tps.dropna(subset=["start_time", "end_time"]).copy()
+    if not _tps.empty:
+        _tps = _tps[_tps["status"].astype(str).str.lower() == "complete"].copy()
+        _tps = _tps[_tps["end_time"] >= _tps["start_time"]]
+        _tps["duration_hours"] = (
+            _tps["end_time"] - _tps["start_time"]
+        ).dt.total_seconds() / 3600.0
+    if _tps.empty:
+        st.info("No completed events available to compute durations.")
+    else:
+        # Optional step names
+        steps_df = _tables.get("process_steps", pd.DataFrame())
+        have_step_names = (not steps_df.empty) and {"step_id", "step_name"}.issubset(
+            steps_df.columns
+        )
+        if have_step_names:
+            step_names_map = steps_df[["step_id", "step_name"]].drop_duplicates()
+        else:
+            step_names_map = pd.DataFrame(columns=["step_id", "step_name"]).assign(
+                step_name=pd.Series(dtype=object)
+            )
+
+        # Optional product names
+        prods_df = _tables.get("products", pd.DataFrame())
+        have_prod_names = (not prods_df.empty) and {"product_id", "name"}.issubset(
+            prods_df.columns
+        )
+        if have_prod_names:
+            prod_names_map = prods_df[["product_id", "name"]].rename(
+                columns={"name": "product_label"}
+            )
+        else:
+            prod_names_map = pd.DataFrame(columns=["product_id", "product_label"])
+
+        agg = (
+            _tps.groupby(["product_id", "step_id"], dropna=False)
+            .agg(
+                avg_duration_hours=("duration_hours", "mean"),
+                events=("duration_hours", "count"),
+            )
+            .reset_index()
+        )
+        agg = agg.merge(step_names_map, on="step_id", how="left")
+        agg = agg.merge(prod_names_map, on="product_id", how="left")
+        agg["product_label"] = agg["product_label"].fillna(
+            agg["product_id"].astype(str)
+        )
+        agg["step_label"] = agg["step_name"].fillna(agg["step_id"].astype(str))
+        agg["avg_duration_hours"] = agg["avg_duration_hours"].astype(float)
+
+        # Product filter
+        products_list = (
+            agg.sort_values(["product_label"])["product_label"].unique().tolist()
+        )
+        col_tp1, col_tp2 = st.columns([2, 3])
+        with col_tp1:
+            selected_product = st.selectbox(
+                "Filter by product",
+                options=["All"] + products_list,
+                index=0,
+                key="tps_product",
+            )
+            display_df = agg.copy()
+            if selected_product != "All":
+                display_df = display_df[display_df["product_label"] == selected_product]
+            display_df = display_df.sort_values(
+                ["product_label", "avg_duration_hours"], ascending=[True, False]
+            )
+            st.dataframe(
+                display_df[
+                    ["product_label", "step_label", "avg_duration_hours", "events"]
+                ].rename(
+                    columns={
+                        "product_label": "Product",
+                        "step_label": "Step",
+                        "avg_duration_hours": "Avg Duration (hrs)",
+                        "events": "Completed Events",
+                    }
+                ),
+                use_container_width=True,
+            )
+        with col_tp2:
+            if selected_product != "All":
+                chart_df = display_df.sort_values("avg_duration_hours", ascending=False)
+                if not chart_df.empty:
+                    fig_bar = px.bar(
+                        chart_df,
+                        x="step_label",
+                        y="avg_duration_hours",
+                        color="step_label",
+                        title=f"Average Duration by Step — {selected_product}",
+                        labels={
+                            "step_label": "Step",
+                            "avg_duration_hours": "Avg Duration (hrs)",
+                        },
+                    )
+                    fig_bar.update_layout(showlegend=False)
+                    st.plotly_chart(fig_bar, use_container_width=True)
+            else:
+                st.caption("Select a product to see a step-level bar chart.")
 
 sp = per_step_progress(steps, prod)
 spr = per_run_progress(
