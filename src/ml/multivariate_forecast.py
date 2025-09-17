@@ -48,6 +48,8 @@ SUPPORTED_FEATURES = {
 MIN_NON_NULL = 3
 MIN_DISTINCT = 2
 VAR_EPS = 1e-9
+COEF_INFLUENCE_EPS = 0.05  # threshold on standardized coef magnitude to warn
+MIN_TRAIN_FOR_INFLUENCE = 10  # require at least this many rows to assess
 
 
 class ForecastFeatureAdequacyError(Exception):
@@ -361,6 +363,31 @@ def run_multivariate_forecast(
     # In-sample predictions (smoothed fit)
     yhat_hist = pipe.predict(X_train).tolist()
 
+    # Collect standardized coefficients for non-time drivers (for user feedback)
+    try:
+        est = pipe.named_steps.get("est")
+        coefs = getattr(est, "coef_", None)
+        coef_map: Dict[str, float] = {}
+        low_influence: List[str] = []
+        if coefs is not None and len(X_train.columns) == len(coefs):
+            coef_map = {name: float(coef) for name, coef in zip(X_train.columns, coefs)}
+            # Consider only non-time drivers
+            driver_features = [c for c in X_train.columns if c != "t"]
+            if len(y_train) >= MIN_TRAIN_FOR_INFLUENCE and driver_features:
+                low_influence = [
+                    f for f in driver_features
+                    if abs(coef_map.get(f, 0.0)) < COEF_INFLUENCE_EPS
+                ]
+        influence_meta = {
+            "estimator": model_label,
+            "n_train": int(len(y_train)),
+            "standardized_coefficients": {k: v for k, v in coef_map.items() if k != "t"},
+            "low_influence": low_influence,
+            "threshold": COEF_INFLUENCE_EPS,
+        }
+    except Exception:
+        influence_meta = None
+
     # Residual stddev for intervals
     if len(y_train) > 2:
         resid = y_train - yhat_hist
@@ -402,6 +429,15 @@ def run_multivariate_forecast(
             forecast["yhat_lower"] = forecast["yhat_lower"].clip(lower=0.0)
 
     forecast.to_csv(output_path, index=False)
+    # Write sidecar meta JSON with influence diagnostics (if available)
+    if influence_meta is not None:
+        try:
+            import json, os
+            meta_path = os.path.splitext(output_path)[0] + "_meta.json"
+            with open(meta_path, "w", encoding="utf-8") as fh:
+                json.dump(influence_meta, fh, indent=2)
+        except Exception:
+            pass
     return forecast
 
 

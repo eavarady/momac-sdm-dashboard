@@ -24,3 +24,4 @@ multivariate.py
 linear_forecasted_data.csv
 time_series_forecasted_data.csv
 multivariate_forecasted_data.csv
+multivariate_forecasted_data_meta.json

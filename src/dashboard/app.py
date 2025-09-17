@@ -428,7 +428,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             )
 
     st.markdown("---")
-    run_mv = st.button("Generate Multivariate Scenario (Placeholder)")
+    run_mv = st.button("Generate Multivariate Scenario Forecast")
     if run_mv:
         scenario = {
             "horizon": int(mv_horizon),
@@ -459,6 +459,21 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             }
             fig_mv.update_yaxes(title=Y_AXIS_TITLES.get(mv_agg_metric, "Value"))
             st.plotly_chart(fig_mv, use_container_width=True)
+            # Influence diagnostics
+            try:
+                import json
+                meta_path = os.path.splitext(mv_path)[0] + "_meta.json"
+                if os.path.exists(meta_path):
+                    with open(meta_path, "r", encoding="utf-8") as fh:
+                        meta = json.load(fh)
+                    low = meta.get("low_influence") or []
+                    if low:
+                        st.warning(
+                            "Low influence: the following scenario variable(s) had near-zero standardized coefficients and may have negligible effect: "
+                            + ", ".join(low)
+                        )
+            except Exception:
+                pass
         except ForecastFeatureAdequacyError as fe:
             st.error("One or more selected features are not adequate for modeling.")
             st.warning("\n".join(f"{k}: {v}" for k, v in fe.details.items()))
