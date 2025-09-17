@@ -35,6 +35,7 @@ def generate_mock_data(
     seed: int | None = 42,
     runs_min: int = 6,  # keep higher run counts
     runs_max: int = 12,  # keep higher run counts
+    unit_mode: bool = True,  # default to unit/SFC (qty == 1)
 ):
     if seed is not None:
         random.seed(seed)
@@ -139,7 +140,7 @@ def generate_mock_data(
             start_iso = rand_ts_iso(start_date, end_date)
             start_dt = datetime.strptime(start_iso, "%Y-%m-%dT%H:%M:%SZ")
             status = rand_status()
-            qty = random.randint(1, 10)
+            qty = 1 if unit_mode else random.randint(1, 10)
             # derive a rough duration around estimated_time (0.5x - 1.5x hours)
             est_hours = float(s.get("estimated_time", 1) or 1)
             jitter = random.uniform(0.5, 1.5)
@@ -169,14 +170,22 @@ def generate_mock_data(
     production_log = pd.DataFrame(production_log_rows)
     production_log.to_csv(DATA / "production_log.csv", index=False)
 
-    # Production Targets (run-based, default target_qty=1 unless provided elsewhere)
+    # Production Targets (treat as runs planned quantity)
     if not production_log.empty:
-        pt_df = (
-            production_log[["run_id", "product_id"]].drop_duplicates()
-            # assign a per-run random target between 1 and 10
-            .assign(target_qty=lambda d: [random.randint(1, 10) for _ in range(len(d))])
+        runs_df = (
+            production_log[["run_id", "product_id"]]
+            .drop_duplicates()
+            .assign(
+                target_qty=lambda d: [
+                    (1 if unit_mode else random.randint(1, 10)) for _ in range(len(d))
+                ]
+            )
         )
-        pt_df.to_csv(DATA / "production_targets.csv", index=False)
+        # Write preferred runs.csv
+        runs_out = runs_df.rename(columns={"target_qty": "planned_qty"})
+        runs_out.to_csv(DATA / "runs.csv", index=False)
+        # Write legacy production_targets.csv for backward compatibility
+        runs_df.to_csv(DATA / "production_targets.csv", index=False)
 
     # Machine Metrics (ISO timestamps)
     metrics_rows = []
@@ -216,4 +225,5 @@ if __name__ == "__main__":
     generate_mock_data(
         runs_min=6,
         runs_max=12,
+        unit_mode=True,
     )

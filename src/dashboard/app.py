@@ -526,7 +526,12 @@ else:
 
 
 sp = per_step_progress(steps, prod, targets=targets if not targets.empty else None)
-spr = per_run_progress(steps, prod, targets=targets if not targets.empty else None)
+spr = per_run_progress(
+    steps,
+    prod,
+    targets=targets if not targets.empty else None,
+    runs=_tables.get("runs", pd.DataFrame()),
+)
 overall = overall_progress_by_product(sp)
 
 st.subheader("Progress")
@@ -544,11 +549,26 @@ else:
 st.subheader("Per-Run Progress")
 if not spr.empty:
     disp_run = spr.copy()
+    # Compute percent variants if present
+    if "progress_steps" in disp_run.columns:
+        disp_run["progress_steps_pct"] = (
+            disp_run["progress_steps"].astype(float) * 100.0
+        ).round(1)
+    if "progress_qty" in disp_run.columns and disp_run["progress_qty"].notna().any():
+        disp_run["progress_qty_pct"] = (
+            disp_run["progress_qty"].astype(float) * 100.0
+        ).round(1)
     disp_run["progress_pct"] = (disp_run["progress"].astype(float) * 100.0).round(1)
+
     cols = ["product_id", "run_id"]
-    # Include target if available, then the percent
-    if "target_qty" in disp_run.columns:
-        cols.append("target_qty")
+    if "planned_qty" in disp_run.columns:
+        cols.append("planned_qty")
+    if "execution_mode" in disp_run.columns:
+        cols.append("execution_mode")
+    if "progress_steps_pct" in disp_run.columns:
+        cols.append("progress_steps_pct")
+    if "progress_qty_pct" in disp_run.columns:
+        cols.append("progress_qty_pct")
     cols.append("progress_pct")
     st.dataframe(disp_run[cols], width="stretch")
 else:

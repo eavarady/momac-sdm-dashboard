@@ -13,6 +13,7 @@ from schema.models import (
     MachineMetricRow,
     QualityCheckRow,
     ProductionTargetRow,
+    RunsRow,
 )
 
 # Map logical table name -> (pydantic model, required columns for friendly messages)
@@ -56,6 +57,8 @@ TABLE_REGISTRY: Dict[str, Tuple[Type[BaseModel], Tuple[str, ...]]] = {
     ),
     # Strictly run-based targets: require run_id and target_qty (product_id optional/informational).
     "production_targets": (ProductionTargetRow, ("run_id", "target_qty")),
+    # Preferred runs table: planned quantities per run (supersedes production_targets)
+    "runs": (RunsRow, ("run_id", "planned_qty")),
 }
 
 
@@ -136,6 +139,12 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
             ["run_id"],
             "production_targets.run_id",
         )
+    if "runs" in tables:
+        dup_errors(
+            tables["runs"],
+            ["run_id"],
+            "runs.run_id",
+        )
 
     # FKs
     if {"production_log", "process_steps"} <= tables.keys():
@@ -162,6 +171,67 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
                 errs.append(
                     f"FK production_targets row {i+1}: run_id {rid!r} not found in production_log"
                 )
+    if {"runs", "production_log"} <= tables.keys():
+        runset = set(
+            tables["production_log"]["run_id"].dropna().astype(str).unique().tolist()
+        )
+        for i, r in tables["runs"].reset_index(drop=True).iterrows():
+            rid = str(r.get("run_id", "") or "")
+            if rid not in runset:
+                errs.append(
+                    f"FK runs row {i+1}: run_id {rid!r} not found in production_log"
+                )
+
+    # Unit-mode quantity guard: prefer runs table; fallback to production_targets
+    if {"runs", "production_log"} <= tables.keys():
+        try:
+            rn = tables["runs"]["run_id"].astype(str)
+            pq = (
+                pd.to_numeric(tables["runs"]["planned_qty"], errors="coerce")
+                .fillna(0)
+                .astype(int)
+            )
+            unit_runs = set(rn[pq == 1].tolist())
+            if unit_runs:
+                pl = tables["production_log"][["run_id", "quantity"]].copy()
+                pl["quantity"] = (
+                    pd.to_numeric(pl["quantity"], errors="coerce").fillna(0).astype(int)
+                )
+                bad = pl[
+                    pl["run_id"].astype(str).isin(unit_runs) & (pl["quantity"] != 1)
+                ]
+                if not bad.empty:
+                    bad_runs = bad["run_id"].astype(str).unique().tolist()
+                    errs.append(
+                        f"UNIT_MODE_QUANTITY: runs planned_qty=1 must have event quantity==1 (violations in run_id(s): {bad_runs[:20]})"
+                    )
+        except Exception:
+            pass
+    elif {"production_targets", "production_log"} <= tables.keys():
+        try:
+            pt = tables["production_targets"][["run_id", "target_qty"]].copy()
+            pt["target_qty"] = (
+                pd.to_numeric(pt["target_qty"], errors="coerce").fillna(0).astype(int)
+            )
+            unit_runs = set(
+                pt.loc[pt["target_qty"] == 1, "run_id"].dropna().astype(str)
+            )
+            if unit_runs:
+                pl = tables["production_log"][["run_id", "quantity"]].copy()
+                pl["quantity"] = (
+                    pd.to_numeric(pl["quantity"], errors="coerce").fillna(0).astype(int)
+                )
+                bad = pl[
+                    pl["run_id"].astype(str).isin(unit_runs) & (pl["quantity"] != 1)
+                ]
+                if not bad.empty:
+                    bad_runs = bad["run_id"].astype(str).unique().tolist()
+                    errs.append(
+                        f"UNIT_MODE_QUANTITY: runs planned_qty=1 must have event quantity==1 (violations in run_id(s): {bad_runs[:20]})"
+                    )
+        except Exception:
+            # non-fatal; schema-level validation shouldn't crash if optional tables or columns shift
+            pass
 
     if {"machine_metrics", "machines"} <= tables.keys():
         mset = set(tables["machines"]["machine_id"].astype(str))

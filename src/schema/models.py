@@ -181,6 +181,36 @@ class ProductionTargetRow(_Row):
 # ---- Fact tables ------------------------------------------------------------
 
 
+class RunsRow(_Row):
+    # Preferred run metadata table (supersedes production_targets): planned_qty per run
+    run_id: str = Field(min_length=1)
+    product_id: Optional[str] = None
+    planned_qty: int = Field(ge=0)
+
+    @field_validator("run_id", "product_id", mode="before")
+    @classmethod
+    def _strip(cls, v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+
+    @field_validator("run_id")
+    @classmethod
+    def _require_run(cls, v):
+        if not v:
+            raise ValueError("run_id is required for runs")
+        return v
+
+    @field_validator("planned_qty", mode="before")
+    @classmethod
+    def _to_int(cls, v):
+        try:
+            return max(0, int(float(v)))
+        except Exception:
+            return 0
+
+
 class ProductionLogRow(_Row):
     # Include start/end times so Actual Gantt can render,
     # and enforce logical rules tied to status.
