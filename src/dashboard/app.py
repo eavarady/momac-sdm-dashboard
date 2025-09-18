@@ -726,18 +726,11 @@ else:
         if selected_product != "All":
             chart_df = display_df.sort_values("avg_duration_hours", ascending=False)
             if not chart_df.empty:
-                fig_bar = px.bar(
-                    chart_df,
-                    x="step_label",
-                    y="avg_duration_hours",
-                    color="step_label",
-                    title=f"Average Duration by Step — {selected_product}",
-                    labels={
-                        "step_label": "Step",
-                        "avg_duration_hours": "Avg Duration (hrs)",
-                    },
+                from visualizations.time_per_step import build_time_per_step_bar
+                fig_bar = build_time_per_step_bar(
+                    chart_df[["step_label", "avg_duration_hours"]],
+                    product_label=selected_product,
                 )
-                fig_bar.update_layout(showlegend=False)
                 st.plotly_chart(fig_bar, use_container_width=True)
                 _register_chart(
                     f"tps_bar_{selected_product}",
@@ -770,21 +763,13 @@ if not spr.empty:
             st.progress(max(0.0, min(1.0, pct)))
         # Build an exportable bar chart silently (do not render to UI)
         try:
-            cr_df = current_runs.copy()
-            cr_df["progress_pct"] = (cr_df["progress"].astype(float) * 100.0).round(1)
-            fig_curr = px.bar(
-                cr_df.sort_values(["progress_pct", "run_id"]),
-                x="progress_pct",
-                y="run_id",
-                orientation="h",
-                labels={"progress_pct": "Progress (%)", "run_id": "Run"},
-                title="Current Runs Progress",
-                text="progress_pct",
+            from visualizations.progress_charts import (
+                build_current_runs_progress_bar,
             )
-            fig_curr.update_layout(showlegend=False)
-            fig_curr.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-            fig_curr.update_xaxes(range=[0, 100])
-            _register_chart("progress_current_runs", "Current Runs Progress (bar)", fig_curr)
+            fig_curr = build_current_runs_progress_bar(current_runs)
+            _register_chart(
+                "progress_current_runs", "Current Runs Progress (bar)", fig_curr
+            )
         except Exception:
             pass
 
@@ -799,26 +784,14 @@ if not overall.empty:
         st.progress(max(0.0, min(1.0, pct)))
     # Build an exportable bar chart silently (do not render to UI)
     try:
-        ov_df = overall.copy()
-        ov_df["overall_progress_pct"] = (
-            ov_df["overall_progress"].astype(float) * 100.0
-        ).round(1)
-        fig_overall = px.bar(
-            ov_df.sort_values(["overall_progress_pct", "product_id"]),
-            x="overall_progress_pct",
-            y="product_id",
-            orientation="h",
-            labels={"overall_progress_pct": "Progress (%)", "product_id": "Product"},
-            title="Overall Progress by Product",
-            text="overall_progress_pct",
+        from visualizations.progress_charts import (
+            build_overall_progress_by_product_bar,
         )
-        fig_overall.update_layout(showlegend=False)
-        fig_overall.update_traces(
-            texttemplate="%{text:.1f}%", textposition="outside"
-        )
-        fig_overall.update_xaxes(range=[0, 100])
+        fig_overall = build_overall_progress_by_product_bar(overall)
         _register_chart(
-            "progress_overall_by_product", "Overall Progress by Product (bar)", fig_overall
+            "progress_overall_by_product",
+            "Overall Progress by Product (bar)",
+            fig_overall,
         )
     except Exception:
         pass
