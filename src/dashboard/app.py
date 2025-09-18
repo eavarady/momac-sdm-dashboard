@@ -32,6 +32,47 @@ st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
 st.title("MOMAC SDM Dashboard")
 
+# --- Export (PDF) registry for charts ---
+def _register_chart(key: str, label: str, fig) -> None:
+    if fig is None:
+        return
+    reg = st.session_state.setdefault("export_charts", {})
+    reg[key] = {"label": label, "fig": fig}
+
+def _render_export_pdf_ui(container) -> None:
+    container.markdown("---")
+    container.subheader("Export (PDF)")
+    _reg = st.session_state.get("export_charts", {})
+    if not _reg:
+        container.caption("Generate a chart to enable export.")
+        return
+    selected_keys = container.multiselect(
+        "Charts ready to export",
+        options=list(_reg.keys()),
+        format_func=lambda k: _reg[k]["label"],
+        key="pdf_export_select",
+    )
+    if selected_keys:
+        try:
+            from export.pdf_exporter import figures_to_pdf_bytes
+
+            # Show status where the download button will appear
+            dl_placeholder = container.empty()
+            dl_placeholder.write("Generating PDF...")
+            pdf_bytes = figures_to_pdf_bytes(
+                [(f"{_reg[k]['label']}", _reg[k]["fig"]) for k in selected_keys]
+            )
+            # Replace status with the download button
+            dl_placeholder.download_button(
+                label="Download selected charts (PDF)",
+                data=pdf_bytes,
+                file_name="momac_charts.pdf",
+                mime="application/pdf",
+                key="download_pdf",
+            )
+        except Exception as e:
+            container.warning(f"PDF export failed: {e}")
+
 with st.sidebar:
     st.header("Data Source")
     source = st.radio("Select source", ["CSV", "Google Sheets", "Excel"], index=0)
@@ -76,6 +117,8 @@ with st.sidebar:
 
     else:
         st.caption("Reading from local CSVs in data/")
+    # Placeholder for Export (PDF) UI to be populated after charts are registered
+    export_pdf_container = st.container()
 
 # Load data (fast-fail): if any table is invalid, surface the error and stop
 try:
@@ -228,6 +271,7 @@ with st.expander("Time Series Forecasting", expanded=False):
                     fig_fc = build_forecast_line(fc)
                     fig_fc.update_yaxes(title=Y_AXIS_TITLES.get(agg_metric, "Value"))
                     st.plotly_chart(fig_fc, use_container_width=True)
+                    _register_chart("forecast_ts", "Forecast (Time Series)", fig_fc)
             except Exception as e:
                 st.error(f"Forecasting failed: {e}")
 
@@ -302,6 +346,7 @@ with st.expander("Regression-based forecasting", expanded=False):
                     fig_lr = build_forecast_line(fc_lr)
                     fig_lr.update_yaxes(title=Y_AXIS_TITLES.get(lr_agg_metric, "Value"))
                     st.plotly_chart(fig_lr, use_container_width=True)
+                    _register_chart("forecast_lr", "Forecast (Linear Regression)", fig_lr)
 
             except Exception as e:
                 st.error(f"Linear forecasting failed: {e}")
@@ -461,6 +506,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             }
             fig_mv.update_yaxes(title=Y_AXIS_TITLES.get(mv_agg_metric, "Value"))
             st.plotly_chart(fig_mv, use_container_width=True)
+            _register_chart("forecast_mv", "Forecast (Scenario)", fig_mv)
             # Influence diagnostics
             try:
                 import json
@@ -552,6 +598,11 @@ fig_actual = chart.actual_gantt(
 )
 if fig_actual is not None:
     st.plotly_chart(fig_actual, width="stretch")
+    _register_chart(
+        f"gantt_actual_{view_actual}",
+        f"Gantt — Actual ({'by run' if view_actual == 'by_run' else 'by step'})",
+        fig_actual,
+    )
 else:
     st.info("Actual Gantt unavailable (needs start_time/end_time in production_log).")
 
@@ -564,8 +615,15 @@ fig_planned = chart.planned_gantt(
 )
 if fig_planned is not None:
     st.plotly_chart(fig_planned, width="stretch")
+    _register_chart(
+        f"gantt_planned_{view_planned}",
+        f"Gantt — Planned ({'by run' if view_planned == 'by_run' else 'by step'})",
+        fig_planned,
+    )
 else:
     st.info("Planned Gantt unavailable (needs process_steps with estimated_time).")
+
+# (moved export UI render to end to include all later-registered charts)
 
 
 st.subheader("Time per Step")
@@ -681,6 +739,11 @@ else:
                 )
                 fig_bar.update_layout(showlegend=False)
                 st.plotly_chart(fig_bar, use_container_width=True)
+                _register_chart(
+                    f"tps_bar_{selected_product}",
+                    f"Time per Step — {selected_product}",
+                    fig_bar,
+                )
         else:
             st.caption("Select a product to see a step-level bar chart.")
 
@@ -700,10 +763,30 @@ if not spr.empty:
     if current_runs.empty:
         st.info("No current runs in progress (all runs complete).")
     else:
+        # Show progress bars
         for _, row in current_runs.iterrows():
             pct = float(row["progress"])
             st.write(f"**{row['run_id']}** — {pct:.0%}")
             st.progress(max(0.0, min(1.0, pct)))
+        # Build an exportable bar chart silently (do not render to UI)
+        try:
+            cr_df = current_runs.copy()
+            cr_df["progress_pct"] = (cr_df["progress"].astype(float) * 100.0).round(1)
+            fig_curr = px.bar(
+                cr_df.sort_values(["progress_pct", "run_id"]),
+                x="progress_pct",
+                y="run_id",
+                orientation="h",
+                labels={"progress_pct": "Progress (%)", "run_id": "Run"},
+                title="Current Runs Progress",
+                text="progress_pct",
+            )
+            fig_curr.update_layout(showlegend=False)
+            fig_curr.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+            fig_curr.update_xaxes(range=[0, 100])
+            _register_chart("progress_current_runs", "Current Runs Progress (bar)", fig_curr)
+        except Exception:
+            pass
 
 # Separator
 st.markdown("---")
@@ -714,6 +797,31 @@ if not overall.empty:
         pct = float(row["overall_progress"])
         st.write(f"**{row['product_id']}** — {pct:.0%}")
         st.progress(max(0.0, min(1.0, pct)))
+    # Build an exportable bar chart silently (do not render to UI)
+    try:
+        ov_df = overall.copy()
+        ov_df["overall_progress_pct"] = (
+            ov_df["overall_progress"].astype(float) * 100.0
+        ).round(1)
+        fig_overall = px.bar(
+            ov_df.sort_values(["overall_progress_pct", "product_id"]),
+            x="overall_progress_pct",
+            y="product_id",
+            orientation="h",
+            labels={"overall_progress_pct": "Progress (%)", "product_id": "Product"},
+            title="Overall Progress by Product",
+            text="overall_progress_pct",
+        )
+        fig_overall.update_layout(showlegend=False)
+        fig_overall.update_traces(
+            texttemplate="%{text:.1f}%", textposition="outside"
+        )
+        fig_overall.update_xaxes(range=[0, 100])
+        _register_chart(
+            "progress_overall_by_product", "Overall Progress by Product (bar)", fig_overall
+        )
+    except Exception:
+        pass
 else:
     st.info("No overall progress available (check data or filters).")
 
@@ -756,3 +864,9 @@ with st.expander("Preview Data"):
     for name, df in _tables.items():
         st.markdown(f"### {name}")
         st.dataframe(df.head(20), width="stretch")
+
+# Finally render Export (PDF) UI in the sidebar now that all charts could be registered
+try:
+    _render_export_pdf_ui(export_pdf_container)
+except Exception:
+    pass
