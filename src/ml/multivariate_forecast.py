@@ -160,7 +160,7 @@ def _compute_feature_series(
                     # Align to ds_index (ensure ds_index is DatetimeIndex and naive)
                     target_index = pd.DatetimeIndex(ds_index)
                     rate = grouped["defect_rate_pct"].reindex(target_index).astype(float)
-                    rate = rate.ffill().bfill()
+                    rate = rate.ffill().bfill().infer_objects(copy=False)
                     feats["defect_rate_pct"] = rate
                 else:
                     feats["defect_rate_pct"] = pd.Series([np.nan] * len(ds_index), index=ds_index)

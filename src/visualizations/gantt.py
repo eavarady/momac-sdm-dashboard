@@ -67,13 +67,13 @@ class GanttChart:
                     how="left",
                 )
                 # Overwrite label where a name is available
-                df["product_label"] = df["name"].fillna(df["product_label"])
+                df["product_label"] = df["name"].fillna(df["product_label"]).infer_objects(copy=False)
                 df = df.drop(columns=["name"])
             elif isinstance(product_names, Mapping):
                 df["product_label"] = (
                     df["product_id"]
                     .map(lambda x: product_names.get(x))
-                    .fillna(df["product_label"])
+                    .fillna(df["product_label"]).infer_objects(copy=False)
                 )
 
         # Map step_id -> step_name (optional)
@@ -247,7 +247,7 @@ class GanttChart:
                 )
         df["product_label"] = df.get("product_label", pd.Series(dtype=object)).fillna(
             df["product_id"].astype(str)
-        )
+        ).infer_objects(copy=False)
 
         offsets = planned_finish_offsets(df)
         if offsets is None or offsets.empty:

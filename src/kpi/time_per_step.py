@@ -151,8 +151,8 @@ def compute_time_per_step(
     else:
         agg["product_label"] = pd.NA
 
-    agg["product_label"] = agg["product_label"].fillna(agg["product_id"].astype(str))
-    agg["step_label"] = agg["step_name"].fillna(agg["step_id"].astype(str))
+    agg["product_label"] = agg["product_label"].fillna(agg["product_id"].astype(str)).infer_objects(copy=False)
+    agg["step_label"] = agg["step_name"].fillna(agg["step_id"].astype(str)).infer_objects(copy=False)
     agg["avg_duration_hours"] = agg["avg_duration_hours"].astype(float)
     agg["median_duration_hours"] = agg["median_duration_hours"].astype(float)
     # std can be NaN for single event; present as 0.0 for clarity

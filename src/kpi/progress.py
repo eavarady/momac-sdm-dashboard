@@ -1,5 +1,6 @@
 from __future__ import annotations
 import pandas as pd
+import numpy as np
 
 
 def _normalize_status_col(df: pd.DataFrame) -> pd.DataFrame:
@@ -67,7 +68,7 @@ def per_step_progress(
         pivot["in_progress_qty"] = 0
 
     merged = base.merge(pivot, on=["product_id", "step_id"], how="left")
-    merged["complete_qty"] = merged["complete_qty"].fillna(0)
+    merged["complete_qty"] = merged["complete_qty"].fillna(0).infer_objects(copy=False)
     merged["in_progress_qty"] = merged["in_progress_qty"].fillna(0)
 
     denom = merged["complete_qty"] + merged["in_progress_qty"]
@@ -135,7 +136,9 @@ def per_run_progress(
         )
 
     log = _normalize_status_col(production_log.copy())
-    log["quantity"] = pd.to_numeric(log.get("quantity", 0), errors="coerce").fillna(0)
+    log["quantity"] = (
+        pd.to_numeric(log.get("quantity", 0), errors="coerce").astype(float).fillna(0.0)
+    )
 
     # Step universe and totals per product (fixed denominator)
     steps_pp = process_steps[["product_id", "step_id"]].drop_duplicates()
@@ -193,11 +196,13 @@ def per_run_progress(
     per_run_step = run_keys.merge(
         steps_completed, on=["product_id", "run_id"], how="left"
     ).merge(totals, on="product_id", how="left")
-    per_run_step["steps_completed"] = per_run_step["steps_completed"].fillna(0)
+    per_run_step["steps_completed"] = pd.to_numeric(
+        per_run_step["steps_completed"], errors="coerce"
+    ).fillna(0.0)
     per_run_step["total_steps"] = pd.to_numeric(
         per_run_step["total_steps"], errors="coerce"
-    ).fillna(0)
-    per_run_step["progress_steps"] = 0.0
+    ).fillna(0.0)
+    per_run_step["progress_steps"] = 0.0  # float dtype
     valid_den = per_run_step["total_steps"] > 0
     per_run_step.loc[valid_den, "progress_steps"] = (
         per_run_step.loc[valid_den, "steps_completed"]
@@ -226,7 +231,9 @@ def per_run_progress(
         .rename(columns={"qty_out": "qty_out"})
         .copy()
     )
-    base["qty_out"] = pd.to_numeric(base.get("qty_out", 0), errors="coerce").fillna(0)
+    base["qty_out"] = (
+        pd.to_numeric(base.get("qty_out", 0), errors="coerce").astype(float).fillna(0.0)
+    )
 
     # Planned quantity (optional)
     planned = None
@@ -244,17 +251,18 @@ def per_run_progress(
         base = base.merge(planned, on="run_id", how="left")
         base["planned_qty"] = pd.to_numeric(
             base.get("planned_qty", 0), errors="coerce"
-        ).fillna(0)
+        ).astype(float).fillna(0.0)
 
         has_plan = base["planned_qty"] > 0
-        base["progress_qty"] = None
+        # Initialize as float column
+        base["progress_qty"] = np.nan
         base.loc[has_plan, "progress_qty"] = (
             base.loc[has_plan, "qty_out"] / base.loc[has_plan, "planned_qty"]
         ).clip(0, 1)
 
         # Default to step-based; for batch runs (planned_qty > 1), use qty-based
         base["progress_steps"] = base["progress_steps"].clip(0, 1)
-        base["progress"] = base["progress_steps"]
+        base["progress"] = base["progress_steps"].astype(float)
         use_qty = base["planned_qty"] > 1
         base.loc[use_qty & base["progress_qty"].notna(), "progress"] = base.loc[
             use_qty & base["progress_qty"].notna(), "progress_qty"
@@ -265,11 +273,11 @@ def per_run_progress(
         base.loc[qty_done, "progress"] = 1.0
         base["progress"] = base["progress"].clip(0, 1)
     else:
-        base["planned_qty"] = 0
+        base["planned_qty"] = 0.0
         if "execution_mode" not in base.columns:
             base["execution_mode"] = None
-        base["progress_qty"] = None
-        base["progress"] = base["progress_steps"].clip(0, 1)
+        base["progress_qty"] = np.nan
+        base["progress"] = base["progress_steps"].astype(float).clip(0, 1)
 
     out_cols = [
         "product_id",

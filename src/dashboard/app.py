@@ -28,6 +28,9 @@ from ml.multivariate_forecast import (
     ForecastFeatureAdequacyError,
 )
 
+# Opt-in to pandas future behavior to avoid silent downcasting
+pd.set_option('future.no_silent_downcasting', True)
+
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
 st.title("MOMAC SDM Dashboard")
@@ -227,7 +230,7 @@ with st.expander("Time Series Forecasting", expanded=False):
                     )
                     fig_fc = build_forecast_line(fc)
                     fig_fc.update_yaxes(title=Y_AXIS_TITLES.get(agg_metric, "Value"))
-                    st.plotly_chart(fig_fc, use_container_width=True)
+                    st.plotly_chart(fig_fc, width="stretch")
             except Exception as e:
                 st.error(f"Forecasting failed: {e}")
 
@@ -301,7 +304,7 @@ with st.expander("Regression-based forecasting", expanded=False):
                     )
                     fig_lr = build_forecast_line(fc_lr)
                     fig_lr.update_yaxes(title=Y_AXIS_TITLES.get(lr_agg_metric, "Value"))
-                    st.plotly_chart(fig_lr, use_container_width=True)
+                    st.plotly_chart(fig_lr, width="stretch")
 
             except Exception as e:
                 st.error(f"Linear forecasting failed: {e}")
@@ -460,7 +463,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                 "count": "Completed Runs (count)",
             }
             fig_mv.update_yaxes(title=Y_AXIS_TITLES.get(mv_agg_metric, "Value"))
-            st.plotly_chart(fig_mv, use_container_width=True)
+            st.plotly_chart(fig_mv, width="stretch")
             # Influence diagnostics
             try:
                 import json
@@ -630,7 +633,7 @@ else:
                     "events": "Completed Events",
                 }
             ),
-            use_container_width=True,
+            width="stretch",
         )
 
         # CSV export
@@ -680,7 +683,7 @@ else:
                     },
                 )
                 fig_bar.update_layout(showlegend=False)
-                st.plotly_chart(fig_bar, use_container_width=True)
+                st.plotly_chart(fig_bar, width="stretch")
         else:
             st.caption("Select a product to see a step-level bar chart.")
 

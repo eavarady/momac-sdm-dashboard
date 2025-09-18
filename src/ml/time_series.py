@@ -1,11 +1,15 @@
 from adapters import csv_adapter as adapter  # placeholder (not yet used)
 import pandas as pd
 import prophet as pf
+from prophet.models import StanBackendEnum
 from .ts_utils import (
     aggregate_duration_series,
     _infer_future_index,
     build_forecast_frame,
 )
+
+# Opt-in to pandas future behavior to avoid silent downcasting in this module too
+pd.set_option('future.no_silent_downcasting', True)
 
 
 def _baseline_forecast(
@@ -141,7 +145,11 @@ def time_series_forecast(
 
     # Prophet training with failure fallback
     try:
-        model = pf.Prophet()  # (Could simplify config later if needed)
+        # Prefer PyStan backend on Windows to avoid some cmdstan issues; fallback if unavailable
+        try:
+            model = pf.Prophet(stan_backend=StanBackendEnum.PYSTAN)
+        except Exception:
+            model = pf.Prophet()
         model.fit(work)
 
         # Manually construct future dataframe to avoid internal deprecated Timestamp arithmetic
