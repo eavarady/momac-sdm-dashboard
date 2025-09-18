@@ -1,3 +1,67 @@
+# MOMAC SDM Dashboard
+
+Purpose
+The SDM app is a lightweight, modular, and flexible Python dashboard for defining, tracking, and analyzing assembly and manufacturing workflows. It allows managers to define processes as sequences of steps, track KPIs, detect bottlenecks, and make informed decisions about manpower and timelines.
+
+Problem Statement
+Assembly managers and C-suite personnel currently lack a simple, ERP-agnostic tool to define, monitor, and analyze manufacturing workflows. This makes it difficult to track key performance indicators (KPIs), identify process bottlenecks in real-time, and accurately forecast project completion timelines.
+
+Target Audience
+The ideal users are MOMAC assembly managers and C-suite personnel (2–3 users) who need a high-level overview of workflow progress without the complexity of a full-scale ERP system.
+
+Strategic Objective
+MOMAC will be among the first in Saudi Arabia to implement Software-Defined Manufacturing, transforming production into a flexible, intelligent, and software-driven capability. By harnessing digital twins, AI-defined workflows, and ontology-based models, MOMAC will pioneer a new industrial standard aligned with Vision 2030, ensuring adaptability, efficiency, and strategic competitiveness in the global market.
+
+
+
+
+## Project Structure
+
+See the repo for this layout:
+
+```
+momac-sdm-dashboard/
+├── data/                    # CSV datasets
+├── notebooks/               # Prototyping & analysis notebooks
+├── scripts/                 # Utilities (mock data, deploy)
+├── src/                     # Production code by module
+├── tests/                   # Unit tests
+├── requirements.txt
+├── setup.py
+└── README.md
+```
+
+## Quickstart
+
+1) Create a virtual environment and install dependencies.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+2) (Optional) Regenerate mock CSV data into `data/`.
+
+```powershell
+# Generate 2 years of daily data with reproducible seed
+python .\scripts\generate_mock_data.py --years 2 --daily --seed 42
+```
+
+3) Run tests.
+
+```powershell
+pytest -q
+```
+
+4) Launch the Streamlit dashboard.
+
+```powershell
+streamlit run src\dashboard\app.py
+```
+
+
 ### Excel (.xlsx)
 
 Prepare a workbook with one sheet per table name
@@ -60,64 +124,47 @@ Behavior:
 
 This table is optional; the dashboard will continue to function without it.
 
-# MOMAC SDM Dashboard
 
-Purpose
-The SDM app is a lightweight, modular, and flexible Python dashboard for defining, tracking, and analyzing assembly and manufacturing workflows. It allows managers to define processes as sequences of steps, track KPIs, detect bottlenecks, and make informed decisions about manpower and timelines.
 
-Problem Statement
-Assembly managers and C-suite personnel currently lack a simple, ERP-agnostic tool to define, monitor, and analyze manufacturing workflows. This makes it difficult to track key performance indicators (KPIs), identify process bottlenecks in real-time, and accurately forecast project completion timelines.
 
-Target Audience
-The ideal users are MOMAC assembly managers and C-suite personnel (2–3 users) who need a high-level overview of workflow progress without the complexity of a full-scale ERP system.
 
-Strategic Objective
-MOMAC will be among the first in Saudi Arabia to implement Software-Defined Manufacturing, transforming production into a flexible, intelligent, and software-driven capability. By harnessing digital twins, AI-defined workflows, and ontology-based models, MOMAC will pioneer a new industrial standard aligned with Vision 2030, ensuring adaptability, efficiency, and strategic competitiveness in the global market.
+## Mock Data Generator (daily, 1–2 years)
 
-## Project Structure
+The script `scripts/generate_mock_data.py` can produce realistic daily activity for a chosen date span, ideal for showcasing forecasting modules.
 
-See the repo for this layout:
-
-```
-momac-sdm-dashboard/
-├── data/                    # CSV datasets
-├── notebooks/               # Prototyping & analysis notebooks
-├── scripts/                 # Utilities (mock data, deploy)
-├── src/                     # Production code by module
-├── tests/                   # Unit tests
-├── requirements.txt
-├── setup.py
-└── README.md
-```
-
-## Quickstart
-
-1) Create a virtual environment and install dependencies.
+Examples (PowerShell):
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+# Two years ending today, daily coverage
+python .\scripts\generate_mock_data.py --years 2 --daily --seed 42
+
+# Explicit date window
+python .\scripts\generate_mock_data.py --start 2024-01-01 --end 2025-12-31 --daily
+
+# Adjust daily volume
+python .\scripts\generate_mock_data.py --years 1 --min-steps-per-day 2 --max-steps-per-day 6
+
+# Batch quantities instead of unit mode
+python .\scripts\generate_mock_data.py --years 1 --batch-mode
 ```
 
-2) (Optional) Regenerate mock CSV data into `data/`.
+Options:
 
-```powershell
-python .\scripts\generate_mock_data.py
-```
+- `--start`, `--end`: ISO dates (YYYY-MM-DD). If omitted, `--years` controls span ending at today.
+- `--years`: Float years to generate (default 1.0).
+- `--daily` / `--no-daily`: Enable daily coverage (default on) or scattered events.
+- `--min-steps-per-day`, `--max-steps-per-day`: Range of per-day step completions.
+- `--unit-mode` / `--batch-mode`: Unit quantity per run vs small random batch quantities.
+- `--seed`: Random seed for reproducibility.
 
-3) Run tests.
+Files produced remain schema-aligned:
 
-```powershell
-pytest -q
-```
-
-4) Launch the Streamlit dashboard.
-
-```powershell
-streamlit run src\dashboard\app.py
-```
+- `machines.csv`, `operators.csv`, `production_lines.csv`, `products.csv`
+- `process_steps.csv` (estimated_time in hours)
+- `production_log.csv` (has `timestamp`, `start_time`, `end_time`, ISO 8601 Z)
+- `runs.csv` (planned quantities per run)
+- `machine_metrics.csv` (1–3 entries per day)
+- `quality_checks.csv` (~weekly entries)
 
 ## Modules Overview
 

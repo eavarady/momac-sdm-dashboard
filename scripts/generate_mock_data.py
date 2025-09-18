@@ -9,7 +9,8 @@ Outputs CSVs under data/ with the enforced schema:
 """
 
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import argparse
 import random
 import pandas as pd
 
@@ -32,16 +33,37 @@ def generate_mock_data(
     steps_per_product: int = 4,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
+    years: float | None = 1.0,
+    daily: bool = True,
+    min_steps_per_day: int = 3,
+    max_steps_per_day: int = 8,
+    runs_per_week: float = 2.0,  # expected run starts per product per week (daily mode)
     seed: int | None = 42,
-    runs_min: int = 6,  # keep higher run counts
-    runs_max: int = 12,  # keep higher run counts
     unit_mode: bool = True,  # default to unit/SFC (qty == 1)
 ):
     if seed is not None:
         random.seed(seed)
 
-    start_date = start_date or datetime(2025, 1, 1)
-    end_date = end_date or datetime(2025, 8, 29)
+    # Establish date window: prefer explicit start/end; else use years back from today (naive UTC)
+    def _to_naive_utc(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return dt
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+    if end_date is None:
+        # normalize to midnight UTC for stable day boundaries
+        today_utc = (
+            datetime.now(timezone.utc)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .replace(tzinfo=None)
+        )
+        end_date = today_utc
+    if start_date is None:
+        days = int(round((years or 1.0) * 365))
+        start_date = end_date - timedelta(days=max(0, days - 1))
+    # normalize any provided tz-aware inputs to naive UTC
+    start_date = _to_naive_utc(start_date)
+    end_date = _to_naive_utc(end_date)
 
     DATA.mkdir(parents=True, exist_ok=True)
 
@@ -122,38 +144,137 @@ def generate_mock_data(
     process_steps = pd.DataFrame(process_steps_rows)
     process_steps.to_csv(DATA / "process_steps.csv", index=False)
 
-    # Production Log (add start_time/end_time; keep legacy timestamp for compatibility)
-    def rand_status() -> str:
-        # Unbiased 50/50 selection
-        return random.choice(["complete", "in_progress"])
+    # Production Log: simulate realistic multi-day runs with consistent run_ids
+    def within_workday(day: datetime) -> tuple[datetime, datetime]:
+        # Return a time window (08:00 to 18:00 UTC) inside the given day
+        start = day.replace(hour=8, minute=0, second=0, microsecond=0)
+        end = day.replace(hour=18, minute=0, second=0, microsecond=0)
+        return start, end
 
-    production_log_rows = []
-    # Increase runs per product (previously 1–3)
-    runs_per_product = {
-        pid: random.randint(runs_min, runs_max) for pid in products["product_id"]
-    }
-    for _, s in process_steps.iterrows():
-        pid = s["product_id"]
-        for run_idx in range(1, runs_per_product[pid] + 1):
-            run_id = f"{pid}-RUN-{run_idx}"
-            # choose a start_time within window
+    date_count = (end_date.date() - start_date.date()).days + 1
+    all_days = [start_date + timedelta(days=i) for i in range(date_count)]
+
+    production_log_rows: list[dict] = []
+    planned_runs: list[dict] = []  # for runs.csv
+
+    def _step_order_for_product(pid: str) -> list[dict]:
+        rows = process_steps.loc[process_steps["product_id"] == pid].copy()
+
+        # Sort by numeric suffix if present, else by step_id
+        def key_fn(sid: str) -> tuple:
+            import re
+
+            m = re.search(r"(\d+)$", str(sid))
+            return (int(m.group(1)) if m else 10**9, str(sid))
+
+        rows = rows.sort_values(by="step_id", key=lambda c: c.map(key_fn))
+        return rows.to_dict(orient="records")
+
+    if daily:
+        # Calculate run count per product based on weeks in range
+        weeks = max(1, int(round(date_count / 7)))
+        runs_per_prod = max(1, int(round(weeks * max(0.1, runs_per_week))))
+        recent_window_days = min(14, date_count)
+        recent_threshold = end_date - timedelta(days=recent_window_days)
+
+        run_counter = 0
+        for pid in products["product_id"]:
+            steps_for_pid = _step_order_for_product(pid)
+            if not steps_for_pid:
+                continue
+            for _ in range(runs_per_prod):
+                run_counter += 1
+                run_id = f"{pid}-RUN-{run_counter:06d}"
+                # assign a random start day in the window
+                current_day = random.choice(all_days)
+                planned_qty = 1 if unit_mode else random.randint(2, 10)
+                planned_runs.append(
+                    {
+                        "run_id": run_id,
+                        "product_id": pid,
+                        "planned_qty": planned_qty,
+                    }
+                )
+
+                in_recent_period = current_day >= recent_threshold
+                inject_inprogress = in_recent_period or (random.random() < 0.1)
+                made_inprogress = False
+                for s in steps_for_pid:
+                    if current_day.date() > end_date.date():
+                        break
+                    day_start, day_end = within_workday(current_day)
+                    start_iso = rand_ts_iso(day_start, day_end)
+                    start_dt = datetime.strptime(start_iso, "%Y-%m-%dT%H:%M:%SZ")
+                    est_hours = float(s.get("estimated_time", 1) or 1)
+                    jitter = random.uniform(0.6, 1.6)
+                    dur_seconds = int(max(0.25, est_hours * jitter) * 3600)
+
+                    status = "complete"
+                    if (
+                        not made_inprogress
+                        and inject_inprogress
+                        and current_day >= recent_threshold
+                        and random.random() < 0.5
+                    ):
+                        status = "in_progress"
+                        made_inprogress = True
+
+                    if status == "complete":
+                        end_dt = start_dt + timedelta(seconds=dur_seconds)
+                        if end_dt > day_end:
+                            end_dt = day_end
+                        end_iso = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                        ts_iso = end_iso
+                    else:
+                        end_iso = ""
+                        ts_iso = start_iso
+
+                    qty = 1 if unit_mode else random.randint(1, planned_qty)
+                    production_log_rows.append(
+                        {
+                            "timestamp": ts_iso,
+                            "start_time": start_iso,
+                            "end_time": end_iso,
+                            "line_id": random.choice(lines["line_id"]),
+                            "product_id": s["product_id"],
+                            "step_id": s["step_id"],
+                            "run_id": run_id,
+                            "quantity": qty,
+                            "status": status,
+                        }
+                    )
+
+                    # If this step is in progress, stop generating later steps for this run
+                    if status == "in_progress":
+                        break
+
+                    # advance day with a small gap (bias toward 0-1 days)
+                    current_day = current_day + timedelta(
+                        days=random.choice([0, 1, 1, 2])
+                    )
+    else:
+        # legacy scattered runs (uniform within full window)
+        steps = process_steps.to_dict(orient="records")
+        total_runs = len(all_days) * max(
+            1, (min_steps_per_day + max_steps_per_day) // 2
+        )
+        for _ in range(total_runs):
+            s = random.choice(steps)
             start_iso = rand_ts_iso(start_date, end_date)
             start_dt = datetime.strptime(start_iso, "%Y-%m-%dT%H:%M:%SZ")
-            status = rand_status()
-            qty = 1 if unit_mode else random.randint(1, 10)
-            # derive a rough duration around estimated_time (0.5x - 1.5x hours)
             est_hours = float(s.get("estimated_time", 1) or 1)
             jitter = random.uniform(0.5, 1.5)
             dur_seconds = int(est_hours * jitter * 3600)
+            status = random.choices(["complete", "in_progress"], weights=[0.8, 0.2])[0]
             if status == "complete":
                 end_dt = start_dt + timedelta(seconds=dur_seconds)
                 end_iso = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-                # legacy timestamp = completion time for complete rows
                 ts_iso = end_iso
             else:
                 end_iso = ""
-                # legacy timestamp = start time for in_progress rows
                 ts_iso = start_iso
+            run_id = f"{s['product_id']}-RUN-{random.randint(1, 999999):06d}"
+            qty = 1 if unit_mode else random.randint(1, 10)
             production_log_rows.append(
                 {
                     "timestamp": ts_iso,
@@ -167,52 +288,68 @@ def generate_mock_data(
                     "status": status,
                 }
             )
+
     production_log = pd.DataFrame(production_log_rows)
     production_log.to_csv(DATA / "production_log.csv", index=False)
 
-    # Production Targets (treat as runs planned quantity)
-    if not production_log.empty:
+    # Runs: planned quantities
+    if daily and planned_runs:
+        runs_df = pd.DataFrame(planned_runs)
+    elif not production_log.empty:
         runs_df = (
             production_log[["run_id", "product_id"]]
             .drop_duplicates()
             .assign(
-                target_qty=lambda d: [
+                planned_qty=lambda d: [
                     (1 if unit_mode else random.randint(1, 10)) for _ in range(len(d))
                 ]
             )
         )
-    # Write preferred runs.csv only (runs-only model)
-    runs_out = runs_df.rename(columns={"target_qty": "planned_qty"})
+    else:
+        runs_df = pd.DataFrame(columns=["run_id", "product_id", "planned_qty"])
+    runs_out = runs_df[
+        [c for c in ["run_id", "product_id", "planned_qty"] if c in runs_df.columns]
+    ].copy()
     runs_out.to_csv(DATA / "runs.csv", index=False)
 
     # Machine Metrics (ISO timestamps)
     metrics_rows = []
-    for _ in range(50):
-        metrics_rows.append(
-            {
-                "timestamp": rand_ts_iso(start_date, end_date),
-                "machine_id": random.choice(machines["machine_id"]),
-                "metric_type": random.choice(
-                    ["temperature", "throughput", "energy_consumption"]
-                ),
-                "metric_value": round(random.uniform(10, 100), 2),
-            }
-        )
+    # Generate 1-3 metrics per day to reflect daily monitoring
+    for day in all_days:
+        day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day.replace(hour=23, minute=59, second=59, microsecond=0)
+        for _ in range(random.randint(1, 3)):
+            metrics_rows.append(
+                {
+                    "timestamp": rand_ts_iso(day_start, day_end),
+                    "machine_id": random.choice(machines["machine_id"]),
+                    "metric_type": random.choice(
+                        ["temperature", "throughput", "energy_consumption"]
+                    ),
+                    "metric_value": round(random.uniform(10, 100), 2),
+                }
+            )
     metrics = pd.DataFrame(metrics_rows)
     metrics.to_csv(DATA / "machine_metrics.csv", index=False)
 
     # Quality Checks (ISO timestamps)
     qc_rows = []
-    for _ in range(20):
-        qc_rows.append(
-            {
-                "timestamp": rand_ts_iso(start_date, end_date),
-                "product_id": random.choice(products["product_id"]),
-                "check_type": random.choice(["visual", "dimensional", "functional"]),
-                "result": random.choice(["pass", "fail"]),
-                "inspector_id": random.choice(operators["operator_id"]),
-            }
-        )
+    # At least one QC per week; sometimes more
+    for day in all_days:
+        if random.random() < 0.25:  # ~1-2 per week on average
+            day_start = day.replace(hour=7, minute=0, second=0, microsecond=0)
+            day_end = day.replace(hour=17, minute=0, second=0, microsecond=0)
+            qc_rows.append(
+                {
+                    "timestamp": rand_ts_iso(day_start, day_end),
+                    "product_id": random.choice(products["product_id"]),
+                    "check_type": random.choice(
+                        ["visual", "dimensional", "functional"]
+                    ),
+                    "result": random.choice(["pass", "fail"]),
+                    "inspector_id": random.choice(operators["operator_id"]),
+                }
+            )
     quality_checks = pd.DataFrame(qc_rows)
     quality_checks.to_csv(DATA / "quality_checks.csv", index=False)
 
@@ -220,8 +357,70 @@ def generate_mock_data(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Generate mock MOMAC SDM dataset")
+    parser.add_argument(
+        "--start", type=str, default=None, help="Start date (YYYY-MM-DD)"
+    )
+    parser.add_argument("--end", type=str, default=None, help="End date (YYYY-MM-DD)")
+    parser.add_argument(
+        "--years", type=float, default=1.0, help="Span in years if start not provided"
+    )
+    parser.add_argument(
+        "--daily", action="store_true", help="Generate daily activity coverage"
+    )
+    parser.add_argument(
+        "--no-daily",
+        dest="daily",
+        action="store_false",
+        help="Disable daily coverage (random scatter)",
+    )
+    parser.set_defaults(daily=True)
+    parser.add_argument("--min-steps-per-day", type=int, default=3)
+    parser.add_argument("--max-steps-per-day", type=int, default=8)
+    parser.add_argument("--runs-per-week", type=float, default=2.0)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--num-machines", type=int, default=5)
+    parser.add_argument("--num-lines", type=int, default=2)
+    parser.add_argument("--num-products", type=int, default=3)
+    parser.add_argument("--num-operators", type=int, default=4)
+    parser.add_argument("--steps-per-product", type=int, default=4)
+    parser.add_argument(
+        "--unit-mode", action="store_true", help="Use unit quantity (1) per run"
+    )
+    parser.add_argument(
+        "--batch-mode",
+        dest="unit_mode",
+        action="store_false",
+        help="Random batch quantities per run",
+    )
+    parser.set_defaults(unit_mode=True)
+
+    args = parser.parse_args()
+
+    def _parse_date(s: str | None) -> datetime | None:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            raise SystemExit(f"Invalid date format '{s}'. Use YYYY-MM-DD")
+
     generate_mock_data(
-        runs_min=6,
-        runs_max=12,
-        unit_mode=True,
+        num_machines=args.num_machines,
+        num_lines=args.num_lines,
+        num_products=args.num_products,
+        num_operators=args.num_operators,
+        steps_per_product=args.steps_per_product,
+        start_date=_parse_date(args.start),
+        end_date=_parse_date(args.end),
+        years=args.years,
+        daily=args.daily,
+        min_steps_per_day=args.min_steps_per_day,
+        max_steps_per_day=args.max_steps_per_day,
+        runs_per_week=args.runs_per_week,
+        seed=args.seed,
+        unit_mode=args.unit_mode,
     )
