@@ -44,13 +44,14 @@ def _register_chart(key: str, label: str, fig) -> None:
 
 def _render_export_pdf_ui(container) -> None:
     container.markdown("---")
-    container.subheader("Export (PDF)")
+    container.subheader("Export (PDF)", help = "Download selected charts and KPIs in a single PDF document.")
     _reg = st.session_state.get("export_charts", {})
     if not _reg:
         container.caption("Generate a chart to enable export.")
         return
     selected_keys = container.multiselect(
         "Charts ready to export",
+        help="Generated charts will also appear here for selection.",
         options=list(_reg.keys()),
         format_func=lambda k: _reg[k]["label"],
         key="pdf_export_select",
@@ -179,6 +180,15 @@ col4.metric("WIP (Qty)", f"{kpis.get('wip', 0)}")
 # schedule_efficiency displays as an index (e.g., 0.83x, 1.12x)
 col5.metric("Schedule Efficiency", f"{(kpis.get('schedule_efficiency') or 0.0):.2f}x")
 col6.metric("On-Time Rate", f"{(kpis.get('on_time_rate') or 0.0)*100:.1f}%")
+
+# Silently build a PDF-friendly KPI summary figure and register for export
+try:
+    from visualizations.kpi_summary import build_kpi_summary_figure
+
+    kpi_fig = build_kpi_summary_figure(kpis)
+    _register_chart("kpi_summary", "KPI Summary", kpi_fig)
+except Exception:
+    pass
 
 ### BOTTLENECK DETECTION AND FORECASTING ###
 
