@@ -14,7 +14,7 @@ from adapters.excel_adapter import (
 from kpi.kpi_calculator import compute_all_kpis
 from ml.bottleneck_detector import detect_bottleneck, top_bottlenecks
 from visualizations.gantt import GanttChart
-from visualizations.time_per_step import (
+from visualizations.time_per_step_viz import (
     build_time_per_step_bar,
     prepare_step_duration_events,
     build_step_duration_histogram,
@@ -801,26 +801,22 @@ else:
         )
     with col_tp2:
         if selected_product != "All":
-            chart_df = display_df.sort_values("avg_duration_hours", ascending=False)
+            chart_df = display_df.sort_values("avg_duration_hours", ascending=False)[
+                ["step_label", "avg_duration_hours"]
+            ].copy()
             if not chart_df.empty:
-                fig_bar = px.bar(
-                    chart_df,
-                    x="step_label",
-                    y="avg_duration_hours",
-                    color="step_label",
-                    title=f"Average Duration by Step — {selected_product}",
-                    labels={
-                        "step_label": "Step",
-                        "avg_duration_hours": "Avg Duration (hrs)",
-                    },
-                )
-                fig_bar.update_layout(showlegend=False)
-                st.plotly_chart(fig_bar, use_container_width=True)
-                _register_chart(
-                    f"time_per_step_{selected_product}",
-                    f"{selected_product} Time per Step",
-                    fig_bar,
-                )
+                try:
+                    fig_bar = build_time_per_step_bar(
+                        chart_df, product_label=selected_product
+                    )
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                    _register_chart(
+                        f"time_per_step_{selected_product}",
+                        f"{selected_product} Time per Step",
+                        fig_bar,
+                    )
+                except Exception as e:
+                    st.warning(f"Failed to build bar chart: {e}")
         else:
             st.caption("Select a product to see a step-level bar chart.")
 
