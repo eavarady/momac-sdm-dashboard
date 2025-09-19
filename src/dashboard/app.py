@@ -12,9 +12,15 @@ from adapters.excel_adapter import (
     get_last_load_stats as get_excel_stats,
 )
 from kpi.kpi_calculator import compute_all_kpis
-from kpi.time_per_step import compute_time_per_step
 from ml.bottleneck_detector import detect_bottleneck, top_bottlenecks
 from visualizations.gantt import GanttChart
+from visualizations.time_per_step import (
+    build_time_per_step_bar,
+    prepare_step_duration_events,
+    build_step_duration_histogram,
+    DEFAULT_HIST_BINS,
+)
+from kpi.time_per_step import compute_time_per_step
 from kpi.progress import (
     per_step_progress,
     overall_progress_by_product,
