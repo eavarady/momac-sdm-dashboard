@@ -42,6 +42,15 @@ def _register_chart(key: str, label: str, fig) -> None:
     reg = st.session_state.setdefault("export_charts", {})
     reg[key] = {"label": label, "fig": fig}
 
+# Compatibility wrapper in case build_forecast_line doesn't accept newer kwargs
+def _build_forecast_line_safe(df, **kwargs):
+    try:
+        return build_forecast_line(df, **kwargs)
+    except TypeError:
+        # Drop unknown kwargs (e.g., connect_actual) and retry
+        safe_kwargs = {k: v for k, v in kwargs.items() if k not in {"connect_actual"}}
+        return build_forecast_line(df, **safe_kwargs)
+
 def _render_export_pdf_ui(container) -> None:
     container.markdown("---")
     container.subheader("Export (PDF)", help = "Download selected charts and KPIs in a single PDF document.")
@@ -221,7 +230,7 @@ with st.expander("Time Series Forecasting", expanded=False):
         "count": "Completed Runs (count)",
     }
     # Forecast settings
-    col_fs1, col_fs2, col_fs3 = st.columns(3)
+    col_fs1, col_fs2 = st.columns(2)
     with col_fs1:
         user_horizon = st.number_input(
             "Requested Horizon (periods)",
@@ -231,29 +240,34 @@ with st.expander("Time Series Forecasting", expanded=False):
             step=1,
             help="Number of future periods to forecast before adaptive reduction.",
         )
-    with col_fs2:
+        multiplier = st.number_input(
+            "Horizon Multiplier", min_value=0.1, max_value=10.0, value=1.0, step=0.1
+        )
         adapt = st.checkbox(
             "Adaptive Horizon",
             value=True,
             help="Reduce horizon based on history span * multiplier",
         )
-        multiplier = st.number_input(
-            "Horizon Multiplier", min_value=0.1, max_value=10.0, value=1.0, step=0.1
+        ts_connect = st.checkbox(
+            "Line chart (connect actual points)",
+            value=True,
+            help="If unchecked, show actuals as scatter points only.",
+            key="ts_connect",
         )
-    with col_fs3:
+    with col_fs2:
+        agg_freq = st.selectbox("Aggregation Frequency", ["D", "W", "M"], index=0)
+        agg_metric_label = st.selectbox(
+            "Aggregation Metric",
+            list(AGG_FRIENDLY.keys()),
+            index=0,
+            help="How to aggregate event durations inside each period.",
+            key="ts_metric",
+        )
+        agg_metric = AGG_FRIENDLY[agg_metric_label]
         baseline_strategy = st.selectbox(
             "Baseline Strategy", ["mean", "linear"], index=0
         )
-
-    agg_freq = st.selectbox("Aggregation Frequency", ["D", "W", "M"], index=0)
-    agg_metric_label = st.selectbox(
-        "Aggregation Metric",
-        list(AGG_FRIENDLY.keys()),
-        index=0,
-        help="How to aggregate event durations inside each period.",
-        key="ts_metric",
-    )
-    agg_metric = AGG_FRIENDLY[agg_metric_label]
+    
 
     if df.empty:
         st.info("No production_log data available for forecasting.")
@@ -281,9 +295,14 @@ with st.expander("Time Series Forecasting", expanded=False):
                     st.success(
                         f"Forecast complete. Effective horizon: {future_rows} periods."
                     )
-                    fig_fc = build_forecast_line(fc)
+                    fig_fc = _build_forecast_line_safe(fc, connect_actual=bool(ts_connect))
                     fig_fc.update_yaxes(title=Y_AXIS_TITLES.get(agg_metric, "Value"))
                     st.plotly_chart(fig_fc, use_container_width=True)
+                    _register_chart(
+                        "forecast_ts",
+                        "Forecast (Time Series)",
+                        fig_fc,
+                    )
             except Exception as e:
                 st.error(f"Forecasting failed: {e}")
 
@@ -310,11 +329,8 @@ with st.expander("Regression-based forecasting", expanded=False):
             value=60,
             step=1,
         )
-        lr_agg_freq = st.selectbox(
-            "Aggregation Frequency", ["D", "W", "M"], index=0, key="lr_freq"
-        )
-    with col_lr2:
-        lr_adapt = st.checkbox("Adaptive Horizon", value=True, key="lr_adapt")
+        
+        
         lr_multiplier = st.number_input(
             "Horizon Multiplier",
             min_value=0.1,
@@ -322,6 +338,16 @@ with st.expander("Regression-based forecasting", expanded=False):
             value=1.0,
             step=0.1,
             key="lr_mult",
+        )
+        lr_adapt = st.checkbox("Adaptive Horizon", value=True, key="lr_adapt", help="Reduce horizon based on history span * multiplier")
+
+        lr_connect = st.checkbox(
+            "Line chart (connect actual points)", value=True, key="lr_connect", help="If unchecked, show actuals as scatter points only."
+        )
+
+    with col_lr2:
+        lr_agg_freq = st.selectbox(
+            "Aggregation Frequency", ["D", "W", "M"], index=0, key="lr_freq"
         )
         lr_agg_metric_label = st.selectbox(
             "Aggregation Metric",
@@ -331,7 +357,7 @@ with st.expander("Regression-based forecasting", expanded=False):
             help="How to aggregate event durations inside each period.",
         )
         lr_agg_metric = AGG_FRIENDLY[lr_agg_metric_label]
-
+        
     if df_lr.empty:
         st.info("No production_log data available for regression-based forecasting.")
     else:
@@ -355,9 +381,14 @@ with st.expander("Regression-based forecasting", expanded=False):
                     st.success(
                         f"Linear forecast complete. Effective horizon: {future_rows_lr} periods."
                     )
-                    fig_lr = build_forecast_line(fc_lr)
+                    fig_lr = _build_forecast_line_safe(fc_lr, connect_actual=bool(lr_connect))
                     fig_lr.update_yaxes(title=Y_AXIS_TITLES.get(lr_agg_metric, "Value"))
                     st.plotly_chart(fig_lr, use_container_width=True)
+                    _register_chart(
+                        "forecast_lr",
+                        "Forecast (Linear Regression)",
+                        fig_lr,
+                    )
 
             except Exception as e:
                 st.error(f"Linear forecasting failed: {e}")
@@ -386,6 +417,24 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             step=1,
             key="mv_horizon",
         )
+        mv_multiplier = st.number_input(
+            "Horizon Multiplier",
+            min_value=0.1,
+            max_value=10.0,
+            value=1.0,
+            step=0.1,
+            key="mv_mult",
+        )
+        mv_adapt = st.checkbox(
+            "Adaptive Horizon",
+            value=True,
+            key="mv_adapt",
+            help="Reduce horizon based on history span * multiplier",
+        )
+        mv_connect = st.checkbox(
+            "Line chart (connect actual points)", value=True, key="mv_connect", help="If unchecked, show actuals as scatter points only."
+        )
+    with col_mv2:
         mv_agg_freq = st.selectbox(
             "Aggregation Frequency", ["D", "W", "M"], index=0, key="mv_freq"
         )
@@ -397,24 +446,13 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             help="How to aggregate event durations inside each period.",
         )
         mv_agg_metric = AGG_FRIENDLY[mv_agg_metric_label]
-    with col_mv2:
-        mv_adapt = st.checkbox(
-            "Adaptive Horizon",
-            value=True,
-            key="mv_adapt",
-            help="Reduce horizon based on history span * multiplier",
-        )
-        mv_multiplier = st.number_input(
-            "Horizon Multiplier",
-            min_value=0.1,
-            max_value=10.0,
-            value=1.0,
-            step=0.1,
-            key="mv_mult",
-        )
+        
+        
     # No explicit baseline strategy selector here; multivariate regression will auto-fallback
     # to persistence (extend last or single value) only when data is insufficient.
 
+    
+    
     st.markdown("---")
     st.subheader("Scenario Variables")
     st.caption(
@@ -506,9 +544,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             mv_path = "multivariate_forecasted_data.csv"
             fc_mv = run_multivariate_forecast(_tables, scenario, output_path=mv_path)
             st.success("Multivariate forecast generated.")
-            from visualizations.line_chart import build_forecast_line as _bfl
-
-            fig_mv = _bfl(fc_mv)
+            fig_mv = _build_forecast_line_safe(fc_mv, connect_actual=bool(mv_connect))
             Y_AXIS_TITLES = {
                 "mean": "Average Cycle Time (hrs)",
                 "median": "Typical Cycle Time (hrs)",
@@ -517,6 +553,11 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             }
             fig_mv.update_yaxes(title=Y_AXIS_TITLES.get(mv_agg_metric, "Value"))
             st.plotly_chart(fig_mv, use_container_width=True)
+            _register_chart(
+                "forecast_mv",
+                "Forecast (Scenario)",
+                fig_mv,
+            )
             # Influence diagnostics
             try:
                 import json
@@ -539,7 +580,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             st.info("Unselect the inadequate feature(s) and re-run the forecast.")
         except Exception as e:
             if not scenario["included_variables"]:
-                st.warning(
+                st.error(
                     "Select at least one scenario variable to run a multivariate scenario."
                 )
             else:
@@ -749,6 +790,11 @@ else:
                 )
                 fig_bar.update_layout(showlegend=False)
                 st.plotly_chart(fig_bar, use_container_width=True)
+                _register_chart(
+                    f"time_per_step_{selected_product}",
+                    f"{selected_product} Time per Step",
+                    fig_bar,
+                )
         else:
             st.caption("Select a product to see a step-level bar chart.")
 

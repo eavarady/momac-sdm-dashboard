@@ -6,7 +6,38 @@ import plotly.graph_objects as go
 from PyPDF2 import PdfMerger
 
 
-def figures_to_pdf_bytes(figures: Dict[str, go.Figure] | Iterable[Tuple[str, go.Figure]], *, width: int | None = None, height: int | None = None) -> bytes:
+def _prepare_for_export(fig: go.Figure) -> go.Figure:
+    """Clone and style a figure for high-quality PDF export.
+
+    Ensures a clean white background, readable fonts, consistent margins,
+    and slightly thicker lines for legibility in a static document.
+    """
+    f = go.Figure(fig)  # clone to avoid mutating the on-screen chart
+    # Apply a neutral template if none set (Streamlit interactive theme doesn't carry to Kaleido)
+    try:
+        tmpl = f.layout.template.template if getattr(f.layout, "template", None) else None
+    except Exception:
+        tmpl = None
+    if not tmpl:
+        f.update_layout(template="plotly_white")
+
+    # Consistent font + margins + backgrounds
+    f.update_layout(
+        font=dict(family="Inter, Arial, sans-serif", size=12, color="#222"),
+        margin=dict(l=40, r=20, t=60, b=40),
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        legend=dict(orientation="h", y=1.03, x=0),
+    )
+    return f
+
+
+def figures_to_pdf_bytes(
+    figures: Dict[str, go.Figure] | Iterable[Tuple[str, go.Figure]],
+    *,
+    width: int | None = 1200,
+    height: int | None = 720,
+) -> bytes:
     """
     Render Plotly figures to a single multi-page PDF and return as bytes.
 
@@ -36,7 +67,11 @@ def figures_to_pdf_bytes(figures: Dict[str, go.Figure] | Iterable[Tuple[str, go.
         for label, fig in items:
             if not isinstance(fig, go.Figure):
                 raise TypeError(f"Item '{label}' is not a Plotly Figure.")
-            pdf_bytes = fig.to_image(format="pdf", width=width, height=height)
+            styled = _prepare_for_export(fig)
+            # Respect figure-level explicit sizes if provided; else fall back to defaults
+            export_width = width or getattr(styled.layout, "width", None) or 1200
+            export_height = height or getattr(styled.layout, "height", None) or 720
+            pdf_bytes = styled.to_image(format="pdf", width=export_width, height=export_height)
             buf = BytesIO(pdf_bytes)
             temp_buffers.append(buf)
             merger.append(buf)

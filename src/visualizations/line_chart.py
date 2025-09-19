@@ -42,6 +42,7 @@ def build_forecast_line(
     color_map: Optional[Mapping[str, str]] = None,
     height: int = 420,
     width: Optional[int] = None,
+    connect_actual: bool = True,
 ) -> go.Figure:
     """Create a Plotly figure for forecast data.
 
@@ -78,9 +79,8 @@ def build_forecast_line(
     if getattr(data["ds"].dt, "tz", None) is not None:
         data["ds"] = data["ds"].dt.tz_convert("UTC").dt.tz_localize(None)
     data = data.dropna(subset=["ds"]).sort_values("ds")
-    # Convert to Python datetime objects to avoid deprecated integer arithmetic inside libs
-    # Use list of Timestamp objects (Plotly handles these) avoiding deprecated to_pydatetime semantics
-    ds_py = data["ds"].tolist()
+    # Build ISO strings for robust cross-backend date rendering (Kaleido export safety)
+    data["ds_str"] = data["ds"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
     fig = go.Figure()
 
@@ -90,12 +90,17 @@ def build_forecast_line(
 
     # Historical actuals (before fit so they sit on top of interval later)
     if show_history and "y" in data.columns and hist_mask.any():
+        # Decide whether to connect points with a line
+        if markers:
+            actual_mode = "lines+markers" if connect_actual else "markers"
+        else:
+            actual_mode = "lines" if connect_actual else "markers"
         fig.add_trace(
             go.Scatter(
                 name="Actual",
-                x=data.loc[hist_mask, "ds"],
+                x=data.loc[hist_mask, "ds_str"],
                 y=data.loc[hist_mask, "y"],
-                mode="lines+markers" if markers else "lines",
+                mode=actual_mode,
                 line=dict(color=colors["actual"], width=1.5),
                 marker=dict(size=5) if markers else None,
                 hovertemplate="Actual: %{y:.2f}<extra></extra>",
@@ -107,7 +112,7 @@ def build_forecast_line(
         fig.add_trace(
             go.Scatter(
                 name="In-sample Fit",
-                x=data.loc[hist_mask, "ds"],
+                x=data.loc[hist_mask, "ds_str"],
                 y=data.loc[hist_mask, "yhat"],
                 mode="lines",
                 line=dict(color=colors["forecast"], width=1, dash="dot"),
@@ -121,7 +126,7 @@ def build_forecast_line(
         fig.add_trace(
             go.Scatter(
                 name="Forecast",
-                x=data.loc[future_mask, "ds"],
+                x=data.loc[future_mask, "ds_str"],
                 y=data.loc[future_mask, "yhat"],
                 mode="lines",
                 line=dict(color=colors["forecast"], width=2),
@@ -132,7 +137,7 @@ def build_forecast_line(
         fig.add_trace(
             go.Scatter(
                 name="Forecast",
-                x=data["ds"],
+                x=data["ds_str"],
                 y=data["yhat"],
                 mode="lines",
                 line=dict(color=colors["forecast"], width=2),
@@ -143,13 +148,13 @@ def build_forecast_line(
     # Interval band only for future horizon
     has_bounds = show_bounds and {"yhat_lower", "yhat_upper"}.issubset(data.columns)
     if has_bounds and future_mask.any():
-        fut_ds = data.loc[future_mask, "ds"].tolist()
+        fut_ds = data.loc[future_mask, "ds_str"].tolist()
         fig.add_trace(
             go.Scatter(
                 name="Lower Bound",
                 x=fut_ds,
                 y=data.loc[future_mask, "yhat_lower"],
-                line=dict(width=0),
+                line=dict(width=0, color="rgba(0,0,0,0)"),
                 mode="lines",
                 showlegend=False,
                 hoverinfo="skip",
@@ -160,7 +165,7 @@ def build_forecast_line(
                 name="Prediction Interval",
                 x=fut_ds,
                 y=data.loc[future_mask, "yhat_upper"],
-                line=dict(width=0),
+                line=dict(width=0, color="rgba(0,0,0,0)"),
                 mode="lines",
                 fill="tonexty",
                 fillcolor=colors["interval"],
@@ -171,7 +176,7 @@ def build_forecast_line(
 
     # Vertical separator at last actual point (custom shape to avoid add_vline Timestamp arithmetic)
     if "y" in data.columns and hist_mask.any() and future_mask.any():
-        last_hist_time = data.loc[hist_mask, "ds"].max()
+        last_hist_time = data.loc[hist_mask, "ds_str"].iloc[-1]
         fig.add_shape(
             type="line",
             x0=last_hist_time,
@@ -215,7 +220,7 @@ def build_forecast_line(
         hoverdistance=1,  # tighten so boundary shows both only when exactly aligned
         spikedistance=1,
     )
-    fig.update_xaxes(title="Date", showgrid=True, gridcolor="rgba(0,0,0,0.05)")
+    fig.update_xaxes(title="Date", type="date", showgrid=True, gridcolor="rgba(0,0,0,0.05)")
     fig.update_yaxes(title="Value", showgrid=True, gridcolor="rgba(0,0,0,0.05)")
     return fig
 
