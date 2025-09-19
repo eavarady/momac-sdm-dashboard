@@ -33,6 +33,7 @@ from ml.multivariate_forecast import (
     run_multivariate_forecast,
     ForecastFeatureAdequacyError,
 )
+from utils.date_ranges import compute_preset_range
 
 # Opt-in to pandas future behavior to avoid silent downcasting
 pd.set_option("future.no_silent_downcasting", True)
@@ -627,9 +628,71 @@ else:
 # Gantt charts
 st.subheader("Gantt")
 chart = GanttChart()
-prod = _tables.get("production_log", pd.DataFrame())
+prod_full = _tables.get("production_log", pd.DataFrame())
 steps = _tables.get("process_steps", pd.DataFrame())
 products = _tables.get("products", pd.DataFrame())
+
+# Time filtering (applies to both actual and planned anchoring logic)
+g_col1, g_col2, g_col3 = st.columns([1, 1, 2])
+with g_col1:
+    gantt_from = st.date_input(
+        "From date (Gantt)",
+        value=None,
+        key="gantt_from",
+        help="Filter actual events by start_time >= this date",
+    )
+with g_col2:
+    gantt_to = st.date_input(
+        "To date (Gantt)",
+        value=None,
+        key="gantt_to",
+        help="Filter actual events by start_time <= this date",
+    )
+with g_col3:
+    preset = st.selectbox(
+        "Quick range",
+        [
+            "(none)",
+            "Last 7 days",
+            "Last 14 days",
+            "Last 30 days",
+            "This month",
+            "Last month",
+            "Year to date",
+        ],
+        index=0,
+        help="Apply a quick preset range; manual date inputs override if changed afterward.",
+        key="gantt_preset",
+    )
+    if preset != "(none)":
+        pf, pt = compute_preset_range(preset)
+        if gantt_from is None and pf is not None:
+            gantt_from = pf.date()
+        if gantt_to is None and pt is not None:
+            gantt_to = pt.date()
+
+prod = prod_full.copy()
+if not prod.empty and (gantt_from or gantt_to) and "start_time" in prod.columns:
+    prod["start_time"] = pd.to_datetime(prod["start_time"], utc=True, errors="coerce")
+    if gantt_from:
+        g_from_ts = (
+            pd.Timestamp(gantt_from).tz_localize("UTC")
+            if pd.Timestamp(gantt_from).tz is None
+            else pd.Timestamp(gantt_from).tz_convert("UTC")
+        )
+        prod = prod[prod["start_time"] >= g_from_ts]
+    if gantt_to:
+        g_to_ts = (
+            pd.Timestamp(gantt_to).tz_localize("UTC")
+            if pd.Timestamp(gantt_to).tz is None
+            else pd.Timestamp(gantt_to).tz_convert("UTC")
+        )
+        # inclusive end-of-day: add 1 day minus 1 microsecond
+        g_to_ts_end = g_to_ts + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+        prod = prod[prod["start_time"] <= g_to_ts_end]
+
+if prod_full is not None and not prod_full.empty and prod.empty:
+    st.info("No production events in selected Gantt date range.")
 
 # Optional name mappings
 product_names = None
@@ -865,52 +928,52 @@ else:
             axis=1,
         )
 
-        col_hd1, col_hd2 = st.columns([2, 3])
-        with col_hd1:
-            hist_product = st.selectbox(
-                "Product (distribution)",
-                options=["All"] + sorted(raw["product_label"].unique()),
-                key="hist_product",
-            )
-            subset = (
-                raw
-                if hist_product == "All"
-                else raw[raw["product_label"] == hist_product]
-            )
-            step_filter = st.multiselect(
-                "Steps (optional)",
-                options=sorted(subset["step_label"].unique()),
-                default=[],
-                key="hist_steps",
-            )
-            if step_filter:
-                subset = subset[subset["step_label"].isin(step_filter)]
-            bins = st.slider("Bins", min_value=5, max_value=100, value=30, step=1)
-            log_y = st.checkbox("Log Y-axis", value=False, key="hist_logy")
-        with col_hd2:
-            if subset.empty:
-                st.info("No events matching filters.")
-            else:
-                fig_hist = px.histogram(
-                    subset,
-                    x="duration_hours",
-                    color="step_label",
-                    nbins=bins,
-                    barmode="overlay",
-                    opacity=0.6,
-                    title="Step Duration Distribution"
-                    + ("" if hist_product == "All" else f" — {hist_product}"),
-                    labels={"duration_hours": "Duration (hrs)", "step_label": "Step"},
+        # Histogram of individual step duration events (distribution) via helper functions
+        st.subheader("Step Duration Distribution")
+        if raw.empty:
+            st.info("No events available for the selected filters.")
+        else:
+            col_hd1, col_hd2 = st.columns([2, 3])
+            with col_hd1:
+                hist_product = st.selectbox(
+                    "Product (distribution)",
+                    options=["All"] + sorted(raw["product_label"].unique()),
+                    key="hist_product",
                 )
-                fig_hist.update_layout(yaxis_type="log" if log_y else "linear")
-                st.plotly_chart(fig_hist, use_container_width=True)
-                # Register for export
-                try:
-                    _register_chart(
-                        "hist_step_duration", "Step Duration Distribution", fig_hist
+                subset = (
+                    raw
+                    if hist_product == "All"
+                    else raw[raw["product_label"] == hist_product]
+                )
+                step_filter = st.multiselect(
+                    "Steps (optional)",
+                    options=sorted(subset["step_label"].unique()),
+                    default=[],
+                    key="hist_steps",
+                )
+                if step_filter:
+                    subset = subset[subset["step_label"].isin(step_filter)]
+                bins = st.slider("Bins", min_value=5, max_value=100, value=30, step=1)
+                log_y = st.checkbox("Log Y-axis", value=False, key="hist_logy")
+            with col_hd2:
+                if subset.empty:
+                    st.info("No events matching filters.")
+                else:
+                    fig_hist = build_step_duration_histogram(
+                        subset,
+                        bins=bins,
+                        log_y=log_y,
+                        title="Step Duration Distribution"
+                        + ("" if hist_product == "All" else f" — {hist_product}"),
                     )
-                except Exception:
-                    pass
+                    st.plotly_chart(fig_hist, use_container_width=True)
+                    # Register for export
+                    try:
+                        _register_chart(
+                            "hist_step_duration", "Step Duration Distribution", fig_hist
+                        )
+                    except Exception:
+                        pass
     else:
         st.info("Cannot build histogram (missing required columns).")
 

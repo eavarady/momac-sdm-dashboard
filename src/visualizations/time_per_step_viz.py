@@ -161,7 +161,10 @@ def build_step_duration_histogram(
     step_labels_filter: Optional[Iterable[str]] = None,
     label_lookup: Optional[pd.DataFrame] = None,
     nbins: int = DEFAULT_HIST_BINS,
+    # Backward-compatible alias: callers may pass bins= (earlier inline usage)
+    bins: Optional[int] = None,
     log_y: bool = False,
+    title: Optional[str] = None,
 ) -> Optional["px.Figure"]:
     """Build a histogram of per-event step durations.
 
@@ -215,19 +218,29 @@ def build_step_duration_histogram(
     if df.empty:
         return None
 
-    fig = px.histogram(
-        df,
-        x="duration_hours",
-        color="step_label",
-        nbins=nbins,
-        barmode="overlay",
-        opacity=0.6,
-        title="Step Duration Distribution"
+    # Prefer explicit bins alias if provided
+    nbins_final = bins if bins is not None else nbins
+
+    # Use provided title or construct default
+    base_title = (
+        title
+        if title is not None
+        else "Step Duration Distribution"
         + (
             ""
             if not product_label_filter or product_label_filter == "All"
             else f" — {product_label_filter}"
-        ),
+        )
+    )
+
+    fig = px.histogram(
+        df,
+        x="duration_hours",
+        color="step_label",
+        nbins=nbins_final,
+        barmode="overlay",
+        opacity=0.6,
+        title=base_title,
         labels={"duration_hours": "Duration (hrs)", "step_label": "Step"},
     )
     fig.update_layout(yaxis_type="log" if log_y else "linear")
