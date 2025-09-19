@@ -29,11 +29,12 @@ from ml.multivariate_forecast import (
 )
 
 # Opt-in to pandas future behavior to avoid silent downcasting
-pd.set_option('future.no_silent_downcasting', True)
+pd.set_option("future.no_silent_downcasting", True)
 
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
 st.title("MOMAC SDM Dashboard")
+
 
 # --- Export (PDF) registry for charts ---
 def _register_chart(key: str, label: str, fig) -> None:
@@ -41,6 +42,7 @@ def _register_chart(key: str, label: str, fig) -> None:
         return
     reg = st.session_state.setdefault("export_charts", {})
     reg[key] = {"label": label, "fig": fig}
+
 
 # Compatibility wrapper in case build_forecast_line doesn't accept newer kwargs
 def _build_forecast_line_safe(df, **kwargs):
@@ -51,9 +53,13 @@ def _build_forecast_line_safe(df, **kwargs):
         safe_kwargs = {k: v for k, v in kwargs.items() if k not in {"connect_actual"}}
         return build_forecast_line(df, **safe_kwargs)
 
+
 def _render_export_pdf_ui(container) -> None:
     container.markdown("---")
-    container.subheader("Export (PDF)", help = "Download selected charts and KPIs in a single PDF document.")
+    container.subheader(
+        "Export (PDF)",
+        help="Download selected charts and KPIs in a single PDF document.",
+    )
     _reg = st.session_state.get("export_charts", {})
     if not _reg:
         container.caption("Generate a chart to enable export.")
@@ -85,6 +91,7 @@ def _render_export_pdf_ui(container) -> None:
             )
         except Exception as e:
             container.warning(f"PDF export failed: {e}")
+
 
 with st.sidebar:
     st.header("Data Source")
@@ -267,7 +274,6 @@ with st.expander("Time Series Forecasting", expanded=False):
         baseline_strategy = st.selectbox(
             "Baseline Strategy", ["mean", "linear"], index=0
         )
-    
 
     if df.empty:
         st.info("No production_log data available for forecasting.")
@@ -295,7 +301,9 @@ with st.expander("Time Series Forecasting", expanded=False):
                     st.success(
                         f"Forecast complete. Effective horizon: {future_rows} periods."
                     )
-                    fig_fc = _build_forecast_line_safe(fc, connect_actual=bool(ts_connect))
+                    fig_fc = _build_forecast_line_safe(
+                        fc, connect_actual=bool(ts_connect)
+                    )
                     fig_fc.update_yaxes(title=Y_AXIS_TITLES.get(agg_metric, "Value"))
                     st.plotly_chart(fig_fc, use_container_width=True)
                     _register_chart(
@@ -329,8 +337,7 @@ with st.expander("Regression-based forecasting", expanded=False):
             value=60,
             step=1,
         )
-        
-        
+
         lr_multiplier = st.number_input(
             "Horizon Multiplier",
             min_value=0.1,
@@ -339,10 +346,18 @@ with st.expander("Regression-based forecasting", expanded=False):
             step=0.1,
             key="lr_mult",
         )
-        lr_adapt = st.checkbox("Adaptive Horizon", value=True, key="lr_adapt", help="Reduce horizon based on history span * multiplier")
+        lr_adapt = st.checkbox(
+            "Adaptive Horizon",
+            value=True,
+            key="lr_adapt",
+            help="Reduce horizon based on history span * multiplier",
+        )
 
         lr_connect = st.checkbox(
-            "Line chart (connect actual points)", value=True, key="lr_connect", help="If unchecked, show actuals as scatter points only."
+            "Line chart (connect actual points)",
+            value=True,
+            key="lr_connect",
+            help="If unchecked, show actuals as scatter points only.",
         )
 
     with col_lr2:
@@ -357,7 +372,7 @@ with st.expander("Regression-based forecasting", expanded=False):
             help="How to aggregate event durations inside each period.",
         )
         lr_agg_metric = AGG_FRIENDLY[lr_agg_metric_label]
-        
+
     if df_lr.empty:
         st.info("No production_log data available for regression-based forecasting.")
     else:
@@ -381,7 +396,9 @@ with st.expander("Regression-based forecasting", expanded=False):
                     st.success(
                         f"Linear forecast complete. Effective horizon: {future_rows_lr} periods."
                     )
-                    fig_lr = _build_forecast_line_safe(fc_lr, connect_actual=bool(lr_connect))
+                    fig_lr = _build_forecast_line_safe(
+                        fc_lr, connect_actual=bool(lr_connect)
+                    )
                     fig_lr.update_yaxes(title=Y_AXIS_TITLES.get(lr_agg_metric, "Value"))
                     st.plotly_chart(fig_lr, use_container_width=True)
                     _register_chart(
@@ -432,7 +449,10 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             help="Reduce horizon based on history span * multiplier",
         )
         mv_connect = st.checkbox(
-            "Line chart (connect actual points)", value=True, key="mv_connect", help="If unchecked, show actuals as scatter points only."
+            "Line chart (connect actual points)",
+            value=True,
+            key="mv_connect",
+            help="If unchecked, show actuals as scatter points only.",
         )
     with col_mv2:
         mv_agg_freq = st.selectbox(
@@ -446,13 +466,10 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             help="How to aggregate event durations inside each period.",
         )
         mv_agg_metric = AGG_FRIENDLY[mv_agg_metric_label]
-        
-        
+
     # No explicit baseline strategy selector here; multivariate regression will auto-fallback
     # to persistence (extend last or single value) only when data is insufficient.
 
-    
-    
     st.markdown("---")
     st.subheader("Scenario Variables")
     st.caption(
@@ -676,6 +693,9 @@ else:
 
 # (moved export UI render to end to include all later-registered charts)
 
+#
+# TIME PER STEP
+#
 
 st.subheader("Time per Step")
 plog = _tables.get("production_log", pd.DataFrame())
@@ -798,6 +818,109 @@ else:
         else:
             st.caption("Select a product to see a step-level bar chart.")
 
+
+# Separator
+st.markdown("---")
+
+# Step Durration Histogram
+st.subheader("Step Duration Distribution")
+if agg.empty:
+    st.info("Insufficient data to compute time-per-step (need completed events).")
+else:
+    # Rebuild raw durations from production_log for distribution
+    raw = plog.copy()
+    needed_cols = {"start_time", "end_time", "status", "product_id", "step_id"}
+    if needed_cols.issubset(raw.columns):
+        raw["start_time"] = pd.to_datetime(raw["start_time"], utc=True, errors="coerce")
+        raw["end_time"] = pd.to_datetime(raw["end_time"], utc=True, errors="coerce")
+        raw = raw.dropna(subset=["start_time", "end_time"])
+        raw = raw[raw["status"].astype(str).str.lower() == "complete"]
+        raw = raw[raw["end_time"] >= raw["start_time"]].copy()
+        raw["duration_hours"] = (
+            raw["end_time"] - raw["start_time"]
+        ).dt.total_seconds() / 3600.0
+        # Optional date filter (same as earlier)
+        if ds_val:
+            ds = pd.to_datetime(ds_val, utc=True, errors="coerce")
+            raw = raw[raw["start_time"] >= ds]
+        if de_val:
+            de = pd.to_datetime(de_val, utc=True, errors="coerce")
+            raw = raw[raw["start_time"] <= de]
+        # Map labels if available from agg (faster than re-merging)
+        label_map = agg.set_index(["product_id", "step_id"])[
+            ["product_label", "step_label"]
+        ].to_dict("index")
+        raw["product_label"] = raw.apply(
+            lambda r: label_map.get((r["product_id"], r["step_id"]), {}).get(
+                "product_label", str(r["product_id"])
+            ),
+            axis=1,
+        )
+        raw["step_label"] = raw.apply(
+            lambda r: label_map.get((r["product_id"], r["step_id"]), {}).get(
+                "step_label", str(r["step_id"])
+            ),
+            axis=1,
+        )
+
+        col_hd1, col_hd2 = st.columns([2, 3])
+        with col_hd1:
+            hist_product = st.selectbox(
+                "Product (distribution)",
+                options=["All"] + sorted(raw["product_label"].unique()),
+                key="hist_product",
+            )
+            subset = (
+                raw
+                if hist_product == "All"
+                else raw[raw["product_label"] == hist_product]
+            )
+            step_filter = st.multiselect(
+                "Steps (optional)",
+                options=sorted(subset["step_label"].unique()),
+                default=[],
+                key="hist_steps",
+            )
+            if step_filter:
+                subset = subset[subset["step_label"].isin(step_filter)]
+            bins = st.slider("Bins", min_value=5, max_value=100, value=30, step=1)
+            log_y = st.checkbox("Log Y-axis", value=False, key="hist_logy")
+        with col_hd2:
+            if subset.empty:
+                st.info("No events matching filters.")
+            else:
+                fig_hist = px.histogram(
+                    subset,
+                    x="duration_hours",
+                    color="step_label",
+                    nbins=bins,
+                    barmode="overlay",
+                    opacity=0.6,
+                    title="Step Duration Distribution"
+                    + ("" if hist_product == "All" else f" — {hist_product}"),
+                    labels={"duration_hours": "Duration (hrs)", "step_label": "Step"},
+                )
+                fig_hist.update_layout(yaxis_type="log" if log_y else "linear")
+                st.plotly_chart(fig_hist, use_container_width=True)
+                # Register for export
+                try:
+                    _register_chart(
+                        "hist_step_duration", "Step Duration Distribution", fig_hist
+                    )
+                except Exception:
+                    pass
+    else:
+        st.info("Cannot build histogram (missing required columns).")
+
+# Separator
+st.markdown("---")
+
+#
+# PROGRESS BARS
+#
+st.subheader("Progress")
+# Per-run progress, current runs only (Not 100%), sorted by run_id
+st.subheader("Current Runs Progress")
 sp = per_step_progress(steps, prod)
 spr = per_run_progress(
     steps,
@@ -805,10 +928,6 @@ spr = per_run_progress(
     runs=_tables.get("runs", pd.DataFrame()),
 )
 overall = overall_progress_by_product(sp)
-
-st.subheader("Progress")
-# Per-run progress bars, current runs only (Not 100%), sorted by run_id
-st.subheader("Current Runs Progress")
 if not spr.empty:
     current_runs = spr[spr["progress"] < 1.0].sort_values("run_id")
     if current_runs.empty:
@@ -824,6 +943,7 @@ if not spr.empty:
             from visualizations.progress_charts import (
                 build_current_runs_progress_bar,
             )
+
             fig_curr = build_current_runs_progress_bar(current_runs)
             _register_chart(
                 "progress_current_runs", "Current Runs Progress (bar)", fig_curr
@@ -845,6 +965,7 @@ if not overall.empty:
         from visualizations.progress_charts import (
             build_overall_progress_by_product_bar,
         )
+
         fig_overall = build_overall_progress_by_product_bar(overall)
         _register_chart(
             "progress_overall_by_product",
