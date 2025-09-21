@@ -99,6 +99,11 @@ def _render_export_pdf_ui(container) -> None:
         except Exception as e:
             container.warning(f"PDF export failed: {e}")
 
+# Reusable CSV bytes helper (cache to avoid recomputing on rerun)
+@st.cache_data
+def _csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8")
+
 
 with st.sidebar:
     st.header("Data Source")
@@ -289,7 +294,7 @@ with st.expander("Time Series Forecasting", expanded=False):
         if run_btn:
             try:
                 forecast_path = "time_series_forecasted_data.csv"
-                time_series_forecast(
+                fc = time_series_forecast(
                     df,
                     horizon=int(user_horizon),
                     baseline_strategy=baseline_strategy,
@@ -298,16 +303,15 @@ with st.expander("Time Series Forecasting", expanded=False):
                     agg_freq=agg_freq,
                     agg_metric=agg_metric,
                 )
-                # Attempt to load and plot
-                import os
-
-                if os.path.exists(forecast_path):
-                    fc = pd.read_csv(forecast_path, parse_dates=["ds"])
+                # Plot directly from returned df and provide CSV download
+                if fc is not None and not fc.empty:
                     # Derive effective horizon actually achieved (# future rows)
-                    future_rows = fc[fc["y"].isna()].shape[0]
+                    future_rows = fc[fc["y"].isna()].shape[0] if "y" in fc.columns else 0
                     st.success(
                         f"Forecast complete. Effective horizon: {future_rows} periods."
                     )
+                    # Save to session for potential reuse
+                    st.session_state["fc_ts_df"] = fc.copy()
                     fig_fc = _build_forecast_line_safe(
                         fc, connect_actual=bool(ts_connect)
                     )
@@ -317,6 +321,14 @@ with st.expander("Time Series Forecasting", expanded=False):
                         "forecast_ts",
                         "Forecast (Time Series)",
                         fig_fc,
+                    )
+                    # CSV download from in-memory df
+                    st.download_button(
+                        label="Download CSV",
+                        data=_csv_bytes(fc),
+                        file_name="time_series_forecasted_data.csv",
+                        mime="text/csv",
+                        key="dl_ts_fc",
                     )
             except Exception as e:
                 st.error(f"Forecasting failed: {e}")
@@ -386,8 +398,7 @@ with st.expander("Regression-based forecasting", expanded=False):
         run_lr = st.button("Run Linear Forecast")
         if run_lr:
             try:
-                lr_path = "linear_forecasted_data.csv"
-                linear_forecast(
+                fc_lr = linear_forecast(
                     df_lr,
                     horizon=int(lr_horizon),
                     adapt_horizon=lr_adapt,
@@ -395,14 +406,14 @@ with st.expander("Regression-based forecasting", expanded=False):
                     agg_freq=lr_agg_freq,
                     agg_metric=lr_agg_metric,
                 )
-                import os
-
-                if os.path.exists(lr_path):
-                    fc_lr = pd.read_csv(lr_path, parse_dates=["ds"])
-                    future_rows_lr = fc_lr[fc_lr["y"].isna()].shape[0]
+                if fc_lr is not None and not fc_lr.empty:
+                    future_rows_lr = (
+                        fc_lr[fc_lr["y"].isna()].shape[0] if "y" in fc_lr.columns else 0
+                    )
                     st.success(
                         f"Linear forecast complete. Effective horizon: {future_rows_lr} periods."
                     )
+                    st.session_state["fc_lr_df"] = fc_lr.copy()
                     fig_lr = _build_forecast_line_safe(
                         fc_lr, connect_actual=bool(lr_connect)
                     )
@@ -412,6 +423,13 @@ with st.expander("Regression-based forecasting", expanded=False):
                         "forecast_lr",
                         "Forecast (Linear Regression)",
                         fig_lr,
+                    )
+                    st.download_button(
+                        label="Download CSV",
+                        data=_csv_bytes(fc_lr),
+                        file_name="linear_forecasted_data.csv",
+                        mime="text/csv",
+                        key="dl_lr_fc",
                     )
 
             except Exception as e:
@@ -582,6 +600,15 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                 "Forecast (Scenario)",
                 fig_mv,
             )
+            # Keep in session and provide CSV download from in-memory df
+            st.session_state["fc_mv_df"] = fc_mv.copy()
+            st.download_button(
+                label="Download CSV",
+                data=_csv_bytes(fc_mv),
+                file_name=os.path.basename(mv_path),
+                mime="text/csv",
+                key="dl_mv_fc",
+            )
             # Influence diagnostics
             try:
                 import json
@@ -623,6 +650,18 @@ if top3.empty:
     st.write("No in-progress work detected.")
 else:
     st.dataframe(top3, width="stretch")
+    # CSV download for Top 3 Bottlenecks
+    try:
+        bt_rename = {"step_id": "Step", "total_wip": "WIP"}
+        st.download_button(
+            label="Download CSV",
+            data=_csv_bytes(top3.rename(columns=bt_rename)),
+            file_name="top_bottlenecks.csv",
+            mime="text/csv",
+            key="top3_bottlenecks_csv",
+        )
+    except Exception:
+        pass
 
 
 # Gantt charts
@@ -929,7 +968,6 @@ else:
         )
 
         # Histogram of individual step duration events (distribution) via helper functions
-        st.subheader("Step Duration Distribution")
         if raw.empty:
             st.info("No events available for the selected filters.")
         else:
@@ -1071,6 +1109,28 @@ if not spr.empty:
         cols.append("progress_qty_pct")
     cols.append("progress_pct")
     st.dataframe(disp_run[cols], width="stretch")
+    # CSV export for Per-Run Progress
+    @st.cache_data
+    def _to_csv_per_run(df: pd.DataFrame) -> bytes:
+        return df.to_csv(index=False).encode("utf-8")
+
+    # Friendly column labels for download
+    rename_map = {
+        "product_id": "Product",
+        "run_id": "Run",
+        "planned_qty": "Planned Qty",
+        "execution_mode": "Mode",
+        "progress_steps_pct": "Steps Progress (%)",
+        "progress_qty_pct": "Qty Progress (%)",
+        "progress_pct": "Progress (%)",
+    }
+    st.download_button(
+        label="Download CSV",
+        data=_to_csv_per_run(disp_run[cols].rename(columns=rename_map)),
+        file_name="per_run_progress.csv",
+        mime="text/csv",
+        key="per_run_progress_csv",
+    )
 else:
     st.info("No per-run progress available (check run_id and data).")
 

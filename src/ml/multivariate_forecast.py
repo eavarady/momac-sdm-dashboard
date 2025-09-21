@@ -219,7 +219,7 @@ def run_multivariate_forecast(
     tables: Dict[str, pd.DataFrame],
     scenario: Dict,
     *,
-    output_path: str = "multivariate_forecasted_data.csv",
+    output_path: str | None = None,
     config: MVConfig | None = None,
 ) -> pd.DataFrame:
     """Execute multivariate regression forecast based on scenario.
@@ -428,16 +428,17 @@ def run_multivariate_forecast(
         if intervals is not None:
             forecast["yhat_lower"] = forecast["yhat_lower"].clip(lower=0.0)
 
-    forecast.to_csv(output_path, index=False)
-    # Write sidecar meta JSON with influence diagnostics (if available)
-    if influence_meta is not None:
-        try:
-            import json, os
-            meta_path = os.path.splitext(output_path)[0] + "_meta.json"
-            with open(meta_path, "w", encoding="utf-8") as fh:
-                json.dump(influence_meta, fh, indent=2)
-        except Exception:
-            pass
+    if output_path:
+        forecast.to_csv(output_path, index=False)
+        # Write sidecar meta JSON with influence diagnostics (if available)
+        if influence_meta is not None:
+            try:
+                import json, os
+                meta_path = os.path.splitext(output_path)[0] + "_meta.json"
+                with open(meta_path, "w", encoding="utf-8") as fh:
+                    json.dump(influence_meta, fh, indent=2)
+            except Exception:
+                pass
     return forecast
 
 

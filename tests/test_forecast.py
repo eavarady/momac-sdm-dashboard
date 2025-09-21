@@ -10,7 +10,7 @@ DATA_PATH = os.path.join(
 
 
 @pytest.mark.fast
-def test_time_series_forecast_basic():
+def test_time_series_forecast_basic(tmp_path):
     """Smoke test the forecasting pipeline:
     - Loads production_log.csv (skip if absent)
     - Runs forecasting with a modest horizon (adaptive reduction allowed)
@@ -29,7 +29,7 @@ def test_time_series_forecast_basic():
         horizon=30,
         baseline_strategy="mean",
         adapt_horizon=True,
-        output_path="__test_fc.csv",
+        output_path=str(tmp_path / "__test_fc.csv"),
     )
 
     # Non-empty

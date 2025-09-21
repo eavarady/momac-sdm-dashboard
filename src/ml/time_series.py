@@ -54,7 +54,7 @@ def time_series_forecast(
     adapt_horizon: bool = True,
     horizon_multiplier: float = 1.0,
     fallback_on_failure: bool = True,
-    output_path: str = "time_series_forecasted_data.csv",
+    output_path: str | None = None,
 ) -> pd.DataFrame:
     """
     Forecast durations.
@@ -140,7 +140,8 @@ def time_series_forecast(
     # Pre-fit baseline decision (use effective_horizon)
     if len(work) < min_prophet_points:
         forecast = _baseline_forecast(work, effective_horizon, baseline_strategy)
-        forecast.to_csv(output_path, index=False)
+        if output_path:
+            forecast.to_csv(output_path, index=False)
         return forecast
 
     # Prophet training with failure fallback
@@ -168,7 +169,8 @@ def time_series_forecast(
             raise
         forecast = _baseline_forecast(work, effective_horizon, baseline_strategy)
 
-    forecast.to_csv(output_path, index=False)
+    if output_path:
+        forecast.to_csv(output_path, index=False)
     return forecast
 
 
