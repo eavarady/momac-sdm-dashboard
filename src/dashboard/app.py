@@ -34,6 +34,7 @@ from ml.multivariate_forecast import (
     ForecastFeatureAdequacyError,
 )
 from utils.date_ranges import compute_preset_range
+from export.csv_exporter import to_csv_bytes, safe_filename
 
 # Opt-in to pandas future behavior to avoid silent downcasting
 pd.set_option("future.no_silent_downcasting", True)
@@ -99,10 +100,7 @@ def _render_export_pdf_ui(container) -> None:
         except Exception as e:
             container.warning(f"PDF export failed: {e}")
 
-# Reusable CSV bytes helper (cache to avoid recomputing on rerun)
-@st.cache_data
-def _csv_bytes(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False).encode("utf-8")
+
 
 
 with st.sidebar:
@@ -325,7 +323,7 @@ with st.expander("Time Series Forecasting", expanded=False):
                     # CSV download from in-memory df
                     st.download_button(
                         label="Download CSV",
-                        data=_csv_bytes(fc),
+                        data=to_csv_bytes(fc, index=False),
                         file_name="time_series_forecasted_data.csv",
                         mime="text/csv",
                         key="dl_ts_fc",
@@ -426,7 +424,7 @@ with st.expander("Regression-based forecasting", expanded=False):
                     )
                     st.download_button(
                         label="Download CSV",
-                        data=_csv_bytes(fc_lr),
+                        data=to_csv_bytes(fc_lr, index=False),
                         file_name="linear_forecasted_data.csv",
                         mime="text/csv",
                         key="dl_lr_fc",
@@ -584,7 +582,8 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
         st.session_state["multivariate_scenario"] = scenario
         try:
             mv_path = "multivariate_forecasted_data.csv"
-            fc_mv = run_multivariate_forecast(_tables, scenario, output_path=mv_path)
+            # Keep multivariate forecasts in-memory by default
+            fc_mv = run_multivariate_forecast(_tables, scenario)
             st.success("Multivariate forecast generated.")
             fig_mv = _build_forecast_line_safe(fc_mv, connect_actual=bool(mv_connect))
             Y_AXIS_TITLES = {
@@ -604,8 +603,8 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             st.session_state["fc_mv_df"] = fc_mv.copy()
             st.download_button(
                 label="Download CSV",
-                data=_csv_bytes(fc_mv),
-                file_name=os.path.basename(mv_path),
+                data=to_csv_bytes(fc_mv, index=False),
+                file_name=safe_filename(mv_path),
                 mime="text/csv",
                 key="dl_mv_fc",
             )
@@ -655,7 +654,7 @@ else:
         bt_rename = {"step_id": "Step", "total_wip": "WIP"}
         st.download_button(
             label="Download CSV",
-            data=_csv_bytes(top3.rename(columns=bt_rename)),
+            data=to_csv_bytes(top3, rename=bt_rename, index=False),
             file_name="top_bottlenecks.csv",
             mime="text/csv",
             key="top3_bottlenecks_csv",
@@ -871,32 +870,27 @@ else:
         )
 
         # CSV export
-        @st.cache_data
-        def _to_csv(df: pd.DataFrame) -> bytes:
-            return df.to_csv(index=False).encode("utf-8")
-
         st.download_button(
             label="Download CSV",
-            data=_to_csv(
-                display_df[
-                    [
-                        "product_label",
-                        "step_label",
-                        "avg_duration_hours",
-                        "median_duration_hours",
-                        "std_duration_hours",
-                        "events",
-                    ]
-                ].rename(
-                    columns={
-                        "product_label": "Product",
-                        "step_label": "Step",
-                        "avg_duration_hours": "Avg Duration (hrs)",
-                        "median_duration_hours": "Median (hrs)",
-                        "std_duration_hours": "Std Dev (hrs)",
-                        "events": "Completed Events",
-                    }
-                )
+            data=to_csv_bytes(
+                display_df,
+                columns=[
+                    "product_label",
+                    "step_label",
+                    "avg_duration_hours",
+                    "median_duration_hours",
+                    "std_duration_hours",
+                    "events",
+                ],
+                rename={
+                    "product_label": "Product",
+                    "step_label": "Step",
+                    "avg_duration_hours": "Avg Duration (hrs)",
+                    "median_duration_hours": "Median (hrs)",
+                    "std_duration_hours": "Std Dev (hrs)",
+                    "events": "Completed Events",
+                },
+                index=False,
             ),
             file_name="time_per_step.csv",
             mime="text/csv",
