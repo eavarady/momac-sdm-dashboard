@@ -79,26 +79,47 @@ def _render_export_pdf_ui(container) -> None:
         format_func=lambda k: _reg[k]["label"],
         key="pdf_export_select",
     )
-    if selected_keys:
+
+    # Use a session-scoped cache to avoid regenerating the PDF when the user
+    # simply clicks the download button (Streamlit triggers a rerun on click).
+    # We only regenerate when the selection of keys changes.
+    cache = st.session_state.setdefault("_pdf_export_cache", {})
+    sel_tuple = tuple(selected_keys) if selected_keys else None
+
+    if not selected_keys:
+        container.caption("Select one or more charts to enable export.")
+        # Clear any cached bytes for empty selection
+        if cache.get("keys"):
+            cache.clear()
+        return
+
+    # Create a single placeholder which we will replace with the download button
+    dl_placeholder = container.empty()
+
+    # If the selection changed, recompute and store the bytes
+    if cache.get("keys") != sel_tuple or "bytes" not in cache:
         try:
             from export.pdf_exporter import figures_to_pdf_bytes
 
-            # Show status where the download button will appear
-            dl_placeholder = container.empty()
             dl_placeholder.write("Generating PDF...")
             pdf_bytes = figures_to_pdf_bytes(
                 [(f"{_reg[k]['label']}", _reg[k]["fig"]) for k in selected_keys]
             )
-            # Replace status with the download button
-            dl_placeholder.download_button(
-                label="Download selected charts (PDF)",
-                data=pdf_bytes,
-                file_name="momac_charts.pdf",
-                mime="application/pdf",
-                key="download_pdf",
-            )
+            cache["keys"] = sel_tuple
+            cache["bytes"] = pdf_bytes
         except Exception as e:
-            container.warning(f"PDF export failed: {e}")
+            # Replace the placeholder content with a warning
+            dl_placeholder.warning(f"PDF export failed: {e}")
+            return
+
+    # Replace the placeholder with the download button using the cached bytes
+    dl_placeholder.download_button(
+        label="Download selected charts (PDF)",
+        data=cache.get("bytes"),
+        file_name="momac_charts.pdf",
+        mime="application/pdf",
+        key="download_pdf",
+    )
 
 
 
