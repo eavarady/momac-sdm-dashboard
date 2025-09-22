@@ -221,7 +221,8 @@ def run_multivariate_forecast(
     *,
     output_path: str | None = None,
     config: MVConfig | None = None,
-) -> pd.DataFrame:
+    return_meta: bool = False,
+) -> pd.DataFrame | Tuple[pd.DataFrame, Optional[Dict]]:
     """Execute multivariate regression forecast based on scenario.
 
     Parameters
@@ -439,6 +440,8 @@ def run_multivariate_forecast(
                     json.dump(influence_meta, fh, indent=2)
             except Exception:
                 pass
+    if return_meta:
+        return forecast, influence_meta
     return forecast
 
 

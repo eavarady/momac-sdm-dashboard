@@ -35,6 +35,7 @@ from ml.multivariate_forecast import (
 )
 from utils.date_ranges import compute_preset_range
 from export.csv_exporter import to_csv_bytes, safe_filename
+from export.excel_exporter import to_excel_bytes
 
 # Opt-in to pandas future behavior to avoid silent downcasting
 pd.set_option("future.no_silent_downcasting", True)
@@ -341,13 +342,19 @@ with st.expander("Time Series Forecasting", expanded=False):
                         "Forecast (Time Series)",
                         fig_fc,
                     )
-                    # CSV download from in-memory df
                     st.download_button(
                         label="Download CSV",
                         data=to_csv_bytes(fc, index=False),
                         file_name="time_series_forecasted_data.csv",
                         mime="text/csv",
                         key="dl_ts_fc",
+                    )
+                    st.download_button(
+                        label="Download .xlsx",
+                        data=to_excel_bytes(fc, index=False, sheet_name="Forecast (TS)"),
+                        file_name="time_series_forecasted_data.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="dl_ts_fc_xlsx",
                     )
             except Exception as e:
                 st.error(f"Forecasting failed: {e}")
@@ -449,6 +456,13 @@ with st.expander("Regression-based forecasting", expanded=False):
                         file_name="linear_forecasted_data.csv",
                         mime="text/csv",
                         key="dl_lr_fc",
+                    )
+                    st.download_button(
+                        label="Download .xlsx",
+                        data=to_excel_bytes(fc_lr, index=False, sheet_name="Forecast (LR)"),
+                        file_name="linear_forecasted_data.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="dl_lr_fc_xlsx",
                     )
 
             except Exception as e:
@@ -603,8 +617,12 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
         st.session_state["multivariate_scenario"] = scenario
         try:
             mv_path = "multivariate_forecasted_data.csv"
-            # Keep multivariate forecasts in-memory by default
-            fc_mv = run_multivariate_forecast(_tables, scenario)
+            # Use in-memory forecast and diagnostics (no disk writes)
+            result = run_multivariate_forecast(_tables, scenario, return_meta=True)
+            if isinstance(result, tuple):
+                fc_mv, meta = result
+            else:
+                fc_mv, meta = result, None
             st.success("Multivariate forecast generated.")
             fig_mv = _build_forecast_line_safe(fc_mv, connect_actual=bool(mv_connect))
             Y_AXIS_TITLES = {
@@ -629,20 +647,21 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                 mime="text/csv",
                 key="dl_mv_fc",
             )
-            # Influence diagnostics
+            st.download_button(
+                label="Download .xlsx",
+                data=to_excel_bytes(fc_mv, index=False, sheet_name="Forecast (MV)"),
+                file_name=safe_filename("multivariate_forecasted_data", ext="xlsx"),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_mv_fc_xlsx",
+            )
+            # Influence diagnostics (in-memory)
             try:
-                import json
-
-                meta_path = os.path.splitext(mv_path)[0] + "_meta.json"
-                if os.path.exists(meta_path):
-                    with open(meta_path, "r", encoding="utf-8") as fh:
-                        meta = json.load(fh)
-                    low = meta.get("low_influence") or []
-                    if low:
-                        st.warning(
-                            "Low influence: the following scenario variable(s) had near-zero standardized coefficients and may have negligible effect: "
-                            + ", ".join(low)
-                        )
+                low = (meta or {}).get("low_influence") or []
+                if low:
+                    st.warning(
+                        "Low influence: the following scenario variable(s) had near-zero standardized coefficients and may have negligible effect: "
+                        + ", ".join(low)
+                    )
             except Exception:
                 pass
         except ForecastFeatureAdequacyError as fe:
@@ -670,7 +689,7 @@ if top3.empty:
     st.write("No in-progress work detected.")
 else:
     st.dataframe(top3, width="stretch")
-    # CSV download for Top 3 Bottlenecks
+    # CSV/XLSX download for Top 3 Bottlenecks
     try:
         bt_rename = {"step_id": "Step", "total_wip": "WIP"}
         st.download_button(
@@ -679,6 +698,13 @@ else:
             file_name="top_bottlenecks.csv",
             mime="text/csv",
             key="top3_bottlenecks_csv",
+        )
+        st.download_button(
+            label="Download .xlsx",
+            data=to_excel_bytes(top3, rename=bt_rename, index=False, sheet_name="Top 3 Bottlenecks"),
+            file_name="top_bottlenecks.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="top3_bottlenecks_xlsx",
         )
     except Exception:
         pass
@@ -890,7 +916,7 @@ else:
             width="stretch",
         )
 
-        # CSV export
+        # CSV/XLSX export (inline)
         st.download_button(
             label="Download CSV",
             data=to_csv_bytes(
@@ -915,6 +941,32 @@ else:
             ),
             file_name="time_per_step.csv",
             mime="text/csv",
+        )
+        st.download_button(
+            label="Download .xlsx",
+            data=to_excel_bytes(
+                display_df,
+                columns=[
+                    "product_label",
+                    "step_label",
+                    "avg_duration_hours",
+                    "median_duration_hours",
+                    "std_duration_hours",
+                    "events",
+                ],
+                rename={
+                    "product_label": "Product",
+                    "step_label": "Step",
+                    "avg_duration_hours": "Avg Duration (hrs)",
+                    "median_duration_hours": "Median (hrs)",
+                    "std_duration_hours": "Std Dev (hrs)",
+                    "events": "Completed Events",
+                },
+                index=False,
+                sheet_name="Time per Step",
+            ),
+            file_name="time_per_step.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     with col_tp2:
         if selected_product != "All":
@@ -1124,12 +1176,7 @@ if not spr.empty:
         cols.append("progress_qty_pct")
     cols.append("progress_pct")
     st.dataframe(disp_run[cols], width="stretch")
-    # CSV export for Per-Run Progress
-    @st.cache_data
-    def _to_csv_per_run(df: pd.DataFrame) -> bytes:
-        return df.to_csv(index=False).encode("utf-8")
-
-    # Friendly column labels for download
+    # CSV/XLSX export for Per-Run Progress
     rename_map = {
         "product_id": "Product",
         "run_id": "Run",
@@ -1141,10 +1188,17 @@ if not spr.empty:
     }
     st.download_button(
         label="Download CSV",
-        data=_to_csv_per_run(disp_run[cols].rename(columns=rename_map)),
+        data=to_csv_bytes(disp_run[cols].rename(columns=rename_map), index=False),
         file_name="per_run_progress.csv",
         mime="text/csv",
         key="per_run_progress_csv",
+    )
+    st.download_button(
+        label="Download .xlsx",
+        data=to_excel_bytes(disp_run[cols].rename(columns=rename_map), index=False, sheet_name="Per-Run Progress"),
+        file_name="per_run_progress.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="per_run_progress_xlsx",
     )
 else:
     st.info("No per-run progress available (check run_id and data).")
