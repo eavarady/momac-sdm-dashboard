@@ -9,12 +9,12 @@ def _parse_utc(ts: str | datetime) -> datetime:
     if isinstance(ts, datetime):
         dt = ts
     else:
-        dt = dateparser.isoparse(str(ts))
+        dt = dateparser.parse(str(ts))
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     else:
         dt = dt.astimezone(timezone.utc)
-    return dt
+    return dt.replace(tzinfo=timezone.utc)
 
 
 class _Row(BaseModel):
@@ -115,48 +115,26 @@ class ProcessStepRow(_Row):
 
     @field_validator("assigned_operators", mode="before")
     @classmethod
-    def _ops_parse(cls, v):
-        if v is None:
+    def _parse_ops(cls, v):
+        if v is None or v == "":
             return []
         if isinstance(v, list):
-            items = v
-        else:
-            items = str(v).split(",")
-        out: list[str] = []
-        for it in items:
-            it = str(it).strip()
-            if it and it not in out:
-                out.append(it)
-        return out
+            return [str(x).strip() for x in v if str(x).strip()]
+        return [x.strip() for x in str(v).split(",") if x.strip()]
 
     @field_validator("estimated_time", mode="before")
     @classmethod
-    def _et_int(cls, v):
-        if v is None:
+    def _int_est(cls, v):
+        if v in (None, ""):
             return 0
-        try:
-            iv = int(float(v))
-            return max(0, iv)
-        except Exception:
-            return 0
+        return int(v)
 
     @field_validator("dependency_step_id", mode="before")
     @classmethod
-    def _dep_norm(cls, v):
-        if v is None:
+    def _dep(cls, v):
+        if v in (None, "", "None"):
             return None
-        s = str(v).strip()
-        if s == "" or s.lower() in {"nan", "none"}:
-            return None
-        return s
-
-    @field_validator("step_name")
-    @classmethod
-    def _fallback_name(cls, v, info):
-        if v:
-            return v
-        step_id = info.data.get("step_id", "")
-        return step_id
+        return str(v).strip()
 
     @field_validator("assigned_machine")
     @classmethod
@@ -164,7 +142,6 @@ class ProcessStepRow(_Row):
         requires = info.data.get("requires_machine", True)
         if requires and not v:
             raise ValueError("assigned_machine required when requires_machine=True")
-        # Normalize blank to None when not required
         if not requires and not v:
             return None
         return v
