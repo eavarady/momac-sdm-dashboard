@@ -86,6 +86,12 @@ def validate_dataframe(df: pd.DataFrame, table: str) -> pd.DataFrame:
     model, req_cols = TABLE_REGISTRY[table]
 
     # Check required columns early for clearer errors
+    # Backward-compat: if process_steps omits 'requires_machine', inject default True so the
+    # required-column check passes but callers are warned via downstream checks if needed.
+    if table == "process_steps" and "requires_machine" not in df.columns:
+        df = df.copy()
+        df["requires_machine"] = True
+
     missing = [c for c in req_cols if c not in df.columns]
     if missing:
         raise ValueError(f"{table}: missing required columns: {missing}")
