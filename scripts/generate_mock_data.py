@@ -42,6 +42,8 @@ def generate_mock_data(
     unit_mode: bool = True,  # default to unit/SFC (qty == 1)
     include_requires_machine: bool = True,
     include_actual_machine: bool = False,
+    qc_per_run: bool = False,
+    qc_per_product: bool = False,
 ):
     if seed is not None:
         random.seed(seed)
@@ -423,15 +425,28 @@ def generate_mock_data(
 
     # Quality Checks (ISO timestamps)
     qc_rows = []
-    # At least one QC per week; sometimes more
+    # Sampling QC events across the window
     for day in all_days:
         if random.random() < 0.25:  # ~1-2 per week on average
             day_start = day.replace(hour=7, minute=0, second=0, microsecond=0)
             day_end = day.replace(hour=17, minute=0, second=0, microsecond=0)
+            prod = random.choice(products["product_id"])
+            # try to attach a run/step when available
+            run_id = None
+            step_id = None
+            if not production_log.empty:
+                # pick a random production_log row for this product if exists
+                matches = production_log[production_log.product_id == prod]
+                if not matches.empty:
+                    sel = matches.sample(1).iloc[0]
+                    run_id = sel.get("run_id")
+                    step_id = sel.get("step_id")
             qc_rows.append(
                 {
                     "timestamp": rand_ts_iso(day_start, day_end),
-                    "product_id": random.choice(products["product_id"]),
+                    "product_id": prod,
+                    "run_id": run_id,
+                    "step_id": step_id,
                     "check_type": random.choice(
                         ["visual", "dimensional", "functional"]
                     ),
@@ -439,6 +454,58 @@ def generate_mock_data(
                     "inspector_id": random.choice(operators["operator_id"]),
                 }
             )
+
+    # Guarantee at least one QC per run or per product if requested
+    if qc_per_run and not production_log.empty:
+        # ensure one QC per run: iterate unique runs and add one QC if none exist
+        if qc_rows:
+            existing_runs = set(
+                pd.DataFrame(qc_rows).get("run_id").dropna().unique().tolist()
+            )
+        else:
+            existing_runs = set()
+        for run in production_log["run_id"].dropna().unique():
+            if run not in existing_runs:
+                # pick a representative production_log row for this run
+                sel = production_log[production_log.run_id == run].iloc[0]
+                day = datetime.strptime(sel.start_time, "%Y-%m-%dT%H:%M:%SZ")
+                day_start = day.replace(hour=7, minute=0, second=0, microsecond=0)
+                day_end = day.replace(hour=17, minute=0, second=0, microsecond=0)
+                qc_rows.append(
+                    {
+                        "timestamp": rand_ts_iso(day_start, day_end),
+                        "product_id": sel.product_id,
+                        "run_id": run,
+                        "step_id": sel.step_id,
+                        "check_type": "visual",
+                        "result": "pass",
+                        "inspector_id": random.choice(operators["operator_id"]),
+                    }
+                )
+
+    if qc_per_product and not production_log.empty:
+        existing_products = set(
+            [p for p in (pd.DataFrame(qc_rows).get("product_id") or []) if pd.notna(p)]
+        )
+        for prod in production_log["product_id"].dropna().unique():
+            if prod not in existing_products:
+                matches = production_log[production_log.product_id == prod]
+                sel = matches.sample(1).iloc[0]
+                day = datetime.strptime(sel.start_time, "%Y-%m-%dT%H:%M:%SZ")
+                day_start = day.replace(hour=7, minute=0, second=0, microsecond=0)
+                day_end = day.replace(hour=17, minute=0, second=0, microsecond=0)
+                qc_rows.append(
+                    {
+                        "timestamp": rand_ts_iso(day_start, day_end),
+                        "product_id": prod,
+                        "run_id": sel.run_id,
+                        "step_id": sel.step_id,
+                        "check_type": "visual",
+                        "result": "pass",
+                        "inspector_id": random.choice(operators["operator_id"]),
+                    }
+                )
+
     quality_checks = pd.DataFrame(qc_rows)
     quality_checks.to_csv(DATA / "quality_checks.csv", index=False)
 
@@ -560,6 +627,20 @@ if __name__ == "__main__":
         help="Include actual_machine_id in production_log rows",
     )
     parser.set_defaults(include_actual_machine=False)
+    parser.add_argument(
+        "--qc-per-run",
+        dest="qc_per_run",
+        action="store_true",
+        help="Ensure at least one quality check row exists per run",
+    )
+    parser.set_defaults(qc_per_run=False)
+    parser.add_argument(
+        "--qc-per-product",
+        dest="qc_per_product",
+        action="store_true",
+        help="Ensure at least one quality check row exists per product",
+    )
+    parser.set_defaults(qc_per_product=False)
 
     args = parser.parse_args()
 
@@ -591,4 +672,6 @@ if __name__ == "__main__":
         unit_mode=args.unit_mode,
         include_requires_machine=args.include_requires_machine,
         include_actual_machine=args.include_actual_machine,
+        qc_per_run=args.qc_per_run,
+        qc_per_product=args.qc_per_product,
     )

@@ -1,5 +1,5 @@
 operator_id,name,role
-OP-1,Operator 1,Supervisor
-OP-2,Operator 2,Supervisor
-OP-3,Operator 3,Supervisor
+OP-1,Operator 1,Tester
+OP-2,Operator 2,Tester
+OP-3,Operator 3,Assembler
 OP-4,Operator 4,Assembler

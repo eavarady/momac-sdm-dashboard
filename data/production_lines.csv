@@ -1,3 +1,3 @@
 line_id,name,shift
-LINE-A,Assembly Line A,night
-LINE-B,Assembly Line B,day
+LINE-A,Assembly Line A,day
+LINE-B,Assembly Line B,night
