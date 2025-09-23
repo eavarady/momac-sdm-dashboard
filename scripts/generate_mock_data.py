@@ -357,12 +357,36 @@ def generate_mock_data(
             if end is None:
                 end = start + timedelta(hours=1)
 
-            # prefer the assigned_machine for the step (if valid), else try any machine
+            # prefer the assigned_machine for the step (if valid). Then prefer
+            # machines that are on the SAME production line as the job to avoid
+            # cross-line assignments. Finally order remaining candidates by
+            # current load (least busy first) to balance assignment across machines.
             preferred = assign_map.get((r.get("product_id"), r.get("step_id")))
-            candidate_machines: list[str] = []
+
+            # machines on same line
+            same_line_machines = [
+                m
+                for m in machines_list
+                if m
+                in machines[machines.line_id == r.get("line_id")]["machine_id"].tolist()
+            ]
+
+            # helper to compute load
+            def load_of(m: str) -> int:
+                return len(machine_schedule.get(m, []))
+
+            # build candidate list: preferred (if valid), same-line least-busy, then other least-busy
+            candidate_machines = []
             if preferred and preferred in machines_list:
                 candidate_machines.append(preferred)
-            for m in machines_list:
+
+            # add same-line machines sorted by current load
+            for m in sorted(same_line_machines, key=load_of):
+                if m not in candidate_machines:
+                    candidate_machines.append(m)
+
+            # add remaining machines sorted by load
+            for m in sorted(machines_list, key=load_of):
                 if m not in candidate_machines:
                     candidate_machines.append(m)
 
