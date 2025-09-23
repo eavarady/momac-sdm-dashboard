@@ -36,6 +36,8 @@ from ml.multivariate_forecast import (
 from utils.date_ranges import compute_preset_range
 from export.csv_exporter import to_csv_bytes, safe_filename
 from export.excel_exporter import to_excel_bytes
+from workflow.validator import steps_from_dataframe, validate_dependencies
+from visualizations.dependency_diagram import build_step_dependency_graph
 
 # Opt-in to pandas future behavior to avoid silent downcasting
 pd.set_option("future.no_silent_downcasting", True)
@@ -676,6 +678,8 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             else:
                 st.error(f"Multivariate forecasting failed: {e}")
 
+# Separator
+st.markdown("---")
 
 # HEURISTIC BOTTLENECK DETECTION
 bn = detect_bottleneck(
@@ -709,12 +713,15 @@ else:
     except Exception:
         pass
 
+# Separator
+st.markdown("---")
+
 
 # Gantt charts
 st.subheader("Gantt")
 chart = GanttChart()
 prod_full = _tables.get("production_log", pd.DataFrame())
-steps = _tables.get("process_steps", pd.DataFrame())
+process_steps_df = _tables.get("process_steps", pd.DataFrame())
 products = _tables.get("products", pd.DataFrame())
 
 # Time filtering (applies to both actual and planned anchoring logic)
@@ -785,8 +792,8 @@ if not products.empty and {"product_id", "name"}.issubset(products.columns):
     product_names = products[["product_id", "name"]].copy()
 
 step_names = None
-if not steps.empty and {"step_id", "step_name"}.issubset(steps.columns):
-    step_names = steps[["step_id", "step_name"]].drop_duplicates().copy()
+if not process_steps_df.empty and {"step_id", "step_name"}.issubset(process_steps_df.columns):
+    step_names = process_steps_df[["step_id", "step_name"]].drop_duplicates().copy()
 
 # View toggle controls
 col_g1, col_g2 = st.columns(2)
@@ -829,7 +836,7 @@ else:
     st.info("Actual Gantt unavailable (needs start_time/end_time in production_log).")
 
 fig_planned = chart.planned_gantt(
-    steps,
+    process_steps_df,
     production_log=prod,  # enables optional run-based anchoring if desired
     product_names=product_names,
     anchor="run_start",  # anchor planned bars at earliest start_time per (product_id, run_id)
@@ -845,12 +852,10 @@ if fig_planned is not None:
 else:
     st.info("Planned Gantt unavailable (needs process_steps with estimated_time).")
 
-# (moved export UI render to end to include all later-registered charts)
+# Separator
+st.markdown("---")
 
-#
 # TIME PER STEP
-#
-
 st.subheader("Time per Step")
 plog = _tables.get("production_log", pd.DataFrame())
 
@@ -1085,15 +1090,35 @@ else:
 # Separator
 st.markdown("---")
 
+# Step Dependency Diagram
+st.subheader("Step Dependency Diagram")
+ps_df = _tables.get("process_steps", pd.DataFrame())
+if ps_df is None or ps_df.empty:
+    st.info("No process_steps available to render dependencies.")
+else:
+    # Streamlit embed width only; diagram layout/styling handled in visualization module
+    DAG_EMBED_WIDTH = 1000
+    try:
+        g, warnings = build_step_dependency_graph(ps_df)
+        for msg in warnings or []:
+            st.warning(msg)
+        st.graphviz_chart(g, width=int(DAG_EMBED_WIDTH))
+    except Exception as e:
+        st.error(f"Failed to render dependency diagram: {e}")
+
+
+# Separator
+st.markdown("---")
+
 #
 # PROGRESS BARS
 #
 st.subheader("Progress")
 # Per-run progress, current runs only (Not 100%), sorted by run_id
 st.subheader("Current Runs Progress")
-sp = per_step_progress(steps, prod)
+sp = per_step_progress(process_steps_df, prod)
 spr = per_run_progress(
-    steps,
+    process_steps_df,
     prod,
     runs=_tables.get("runs", pd.DataFrame()),
 )
@@ -1121,8 +1146,6 @@ if not spr.empty:
         except Exception:
             pass
 
-# Separator
-st.markdown("---")
 # Overall progress per product bars
 st.subheader("Overall Progress by Product")
 if not overall.empty:
