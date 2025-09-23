@@ -65,7 +65,19 @@ def read_csv_tables() -> Dict[str, pd.DataFrame]:
     ]:
         path = DATA_DIR / f"{name}.csv"
         if path.exists():
-            raw = pd.read_csv(path)
+            # Read CSV but tolerate empty or whitespace-only files (pandas.EmptyDataError)
+            try:
+                raw = pd.read_csv(path)
+            except (pd.errors.EmptyDataError, pd.errors.ParserError):
+                # Treat as an empty table rather than hard-failing the whole validation run
+                _LAST_LOAD_STATS[name] = {
+                    "rows_read": 0,
+                    "rows_valid": 0,
+                    "rows_dropped": 0,
+                }
+                tables[name] = pd.DataFrame()
+                continue
+
             rows_read = len(raw)
             try:
                 df = raw

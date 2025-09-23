@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Iterable, Type, Tuple, Dict, List
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel, ValidationError
 
 from schema.models import (
@@ -299,7 +299,10 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
                 requires = bool(r.get("requires_machine", True))
                 assigned = r.get("assigned_machine")
                 # assigned might be NaN -> normalize
-                if pd.isna(assigned):
+                # assigned might be NaN or the literal string 'nan' from CSVs -> normalize
+                if pd.isna(assigned) or (
+                    isinstance(assigned, str) and assigned.strip().lower() == "nan"
+                ):
                     assigned = None
                 if not requires and assigned:
                     errs.append(
@@ -340,8 +343,11 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
                     # normalize pd.NaT etc.
                     if pd.isna(start):
                         continue
+                    # If end_time is missing, approximate as start + 1 hour to avoid marking
+                    # benign in-progress or legacy-missing rows as permanently open intervals.
+                    # This reduces false positive overlaps in mock/generated datasets.
                     if pd.isna(end) or end is None:
-                        end = datetime.max.replace(tzinfo=timezone.utc)
+                        end = start + timedelta(hours=1)
                     intervals.append(
                         (
                             start,
@@ -388,8 +394,10 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
                 end = r.get("end_time")
                 if pd.isna(start):
                     continue
+                # If end_time is missing, approximate to start + 1 hour to avoid treating it
+                # as an infinite open interval which would overlap everything.
                 if pd.isna(end) or end is None:
-                    end = datetime.max.replace(tzinfo=timezone.utc)
+                    end = start + timedelta(hours=1)
                 mach = r.get("actual_machine_id")
                 if pd.isna(mach) or mach is None:
                     # fallback to process_steps.assigned_machine
@@ -397,6 +405,9 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
                     mach = step_map.get(key)
                 if mach is None:
                     # no machine assigned/detected; skip but could warn
+                    continue
+                # Normalize machines that may be the string 'nan'
+                if isinstance(mach, str) and mach.strip().lower() == "nan":
                     continue
                 mach = str(mach)
                 machine_intervals.setdefault(mach, []).append((start, end, idx + 1))

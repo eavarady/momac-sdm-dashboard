@@ -40,6 +40,8 @@ def generate_mock_data(
     runs_per_week: float = 2.0,  # expected run starts per product per week (daily mode)
     seed: int | None = 42,
     unit_mode: bool = True,  # default to unit/SFC (qty == 1)
+    include_requires_machine: bool = True,
+    include_actual_machine: bool = False,
 ):
     if seed is not None:
         random.seed(seed)
@@ -126,21 +128,35 @@ def generate_mock_data(
         for idx in range(steps_per_product):
             step_id = f"{prod_id}-STEP-{idx+1}"
             dep = f"{prod_id}-STEP-{idx}" if idx > 0 else ""
-            process_steps_rows.append(
-                {
-                    "product_id": prod_id,
-                    "step_id": step_id,
-                    "step_name": step_names[idx % len(step_names)],
-                    "assigned_machine": random.choice(machines["machine_id"]),
-                    "assigned_operators": ",".join(
-                        random.sample(
-                            list(operators["operator_id"]), k=random.randint(1, 2)
-                        )
-                    ),
-                    "estimated_time": random.randint(1, 8),  # hours
-                    "dependency_step_id": dep,
-                }
+            step_name = step_names[idx % len(step_names)]
+            # Heuristic: unpack/repack are manual; assemble/test use machines
+            if include_requires_machine:
+                requires_machine = False if step_name in ("Unpack", "Repack") else True
+            else:
+                requires_machine = None
+
+            assigned_machine = (
+                random.choice(machines["machine_id"])
+                if (requires_machine or requires_machine is None)
+                else ""
             )
+
+            row = {
+                "product_id": prod_id,
+                "step_id": step_id,
+                "step_name": step_name,
+                "assigned_machine": assigned_machine,
+                "assigned_operators": ",".join(
+                    random.sample(
+                        list(operators["operator_id"]), k=random.randint(1, 2)
+                    )
+                ),
+                "estimated_time": random.randint(1, 8),  # hours
+                "dependency_step_id": dep,
+            }
+            if include_requires_machine:
+                row["requires_machine"] = requires_machine
+            process_steps_rows.append(row)
     process_steps = pd.DataFrame(process_steps_rows)
     process_steps.to_csv(DATA / "process_steps.csv", index=False)
 
@@ -288,6 +304,79 @@ def generate_mock_data(
                     "status": status,
                 }
             )
+
+    # If include_actual_machine requested, post-process production_log_rows to add actual_machine_id
+    if include_actual_machine and process_steps is not None:
+        # build lookup of assigned_machine per (product_id, step_id) and normalize blanks/'nan' -> None
+        assign_map = {}
+        if "product_id" in process_steps.columns and "step_id" in process_steps.columns:
+            for _, rr in process_steps.reset_index(drop=True).iterrows():
+                key = (rr.get("product_id"), rr.get("step_id"))
+                am = rr.get("assigned_machine")
+                if am is None:
+                    assign_map[key] = None
+                else:
+                    s = str(am).strip()
+                    if s == "" or s.lower() == "nan":
+                        assign_map[key] = None
+                    else:
+                        assign_map[key] = s
+
+        # prepare machine list and per-machine schedules
+        machines_list = (
+            list(machines["machine_id"]) if "machine_id" in machines.columns else []
+        )
+        machine_schedule = {m: [] for m in machines_list}
+
+        def _parse_iso_or_none(val: str | None):
+            if not val or (isinstance(val, str) and val.strip() == ""):
+                return None
+            try:
+                return datetime.strptime(val, "%Y-%m-%dT%H:%M:%SZ")
+            except Exception:
+                return None
+
+        # Sort production_log rows by start_time so scheduling is deterministic and avoids
+        # assigning a later-start job before an earlier-start job (which created overlaps).
+        rows_with_dt: list[tuple[datetime | None, datetime | None, dict]] = []
+        for r in production_log_rows:
+            start = _parse_iso_or_none(r.get("start_time"))
+            end = _parse_iso_or_none(r.get("end_time"))
+            rows_with_dt.append((start, end, r))
+        rows_with_dt.sort(key=lambda t: (t[0] is None, t[0] or datetime.min))
+
+        for start, end, r in rows_with_dt:
+            # if no start_time we cannot schedule a machine
+            if start is None:
+                r["actual_machine_id"] = ""
+                continue
+
+            # approximate missing end_time so open intervals don't block scheduling forever
+            if end is None:
+                end = start + timedelta(hours=1)
+
+            # prefer the assigned_machine for the step (if valid), else try any machine
+            preferred = assign_map.get((r.get("product_id"), r.get("step_id")))
+            candidate_machines: list[str] = []
+            if preferred and preferred in machines_list:
+                candidate_machines.append(preferred)
+            for m in machines_list:
+                if m not in candidate_machines:
+                    candidate_machines.append(m)
+
+            chosen: str | None = None
+            for m in candidate_machines:
+                sched = machine_schedule.setdefault(m, [])
+                # check for overlap: intervals intersect -> skip
+                has_overlap = any(
+                    not (end <= ex_s or start >= ex_e) for ex_s, ex_e in sched
+                )
+                if not has_overlap:
+                    chosen = m
+                    sched.append((start, end))
+                    break
+
+            r["actual_machine_id"] = chosen if chosen is not None else ""
 
     production_log = pd.DataFrame(production_log_rows)
     production_log.to_csv(DATA / "production_log.csv", index=False)
@@ -456,6 +545,22 @@ if __name__ == "__main__":
     )
     parser.set_defaults(unit_mode=True)
 
+    parser.add_argument(
+        "--no-requires-machine",
+        dest="include_requires_machine",
+        action="store_false",
+        help="Do not include requires_machine column in process_steps",
+    )
+    parser.set_defaults(include_requires_machine=True)
+
+    parser.add_argument(
+        "--actual-machine",
+        dest="include_actual_machine",
+        action="store_true",
+        help="Include actual_machine_id in production_log rows",
+    )
+    parser.set_defaults(include_actual_machine=False)
+
     args = parser.parse_args()
 
     def _parse_date(s: str | None) -> datetime | None:
@@ -484,4 +589,6 @@ if __name__ == "__main__":
         runs_per_week=args.runs_per_week,
         seed=args.seed,
         unit_mode=args.unit_mode,
+        include_requires_machine=args.include_requires_machine,
+        include_actual_machine=args.include_actual_machine,
     )
