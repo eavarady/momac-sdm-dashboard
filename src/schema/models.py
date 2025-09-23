@@ -241,6 +241,15 @@ class ProductionLogRow(_Row):
         except Exception:
             return 0
 
+    @field_validator("actual_machine_id", mode="before")
+    @classmethod
+    def _actual_machine_strip(cls, v):
+        """Normalize actual_machine_id: strip whitespace and convert empty -> None."""
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+
     @field_validator("end_time")
     @classmethod
     def _check_time_logic(cls, end, info):
