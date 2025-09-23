@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Iterable, Type, Tuple, Dict, List
 import pandas as pd
+from datetime import datetime, timezone
 from pydantic import BaseModel, ValidationError
 
 from schema.models import (
@@ -29,7 +30,6 @@ TABLE_REGISTRY: Dict[str, Tuple[Type[BaseModel], Tuple[str, ...]]] = {
             "step_id",
             "step_name",
             "requires_machine",
-            # assigned_machine intentionally NOT required (conditional)
             "assigned_operators",
             "estimated_time",
             "dependency_step_id",
@@ -58,7 +58,7 @@ TABLE_REGISTRY: Dict[str, Tuple[Type[BaseModel], Tuple[str, ...]]] = {
     ),
     # Preferred runs table: planned quantities per run (supersedes production_targets)
     "runs": (RunsRow, ("run_id", "planned_qty")),
-    "labor_activities": (  # <-- add
+    "labor_activities": (
         LaborActivityRow,
         (
             "activity_id",
@@ -278,6 +278,135 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
                 errs.append(
                     f"FK labor_activities row {i+1}: line_id {str(lid)!r} not found in production_lines"
                 )
+
+    # --- Planning sanity & extra warnings ------------------------------------------------
+    # Process steps: requires_machine / assigned_machine consistency + assigned_operators existence
+    if "process_steps" in tables:
+        try:
+            ps = tables["process_steps"].reset_index(drop=True)
+            op_set = (
+                set(tables["operators"]["operator_id"].astype(str))
+                if "operators" in tables
+                else set()
+            )
+            for i, r in ps.iterrows():
+                requires = bool(r.get("requires_machine", True))
+                assigned = r.get("assigned_machine")
+                # assigned might be NaN -> normalize
+                if pd.isna(assigned):
+                    assigned = None
+                if not requires and assigned:
+                    errs.append(
+                        f"WARN process_steps row {i+1}: requires_machine=False but assigned_machine is set ({assigned!r})"
+                    )
+                if requires and not assigned:
+                    errs.append(
+                        f"ERR process_steps row {i+1}: requires_machine=True but assigned_machine is empty"
+                    )
+                # assigned_operators must exist -> warning
+                ops = r.get("assigned_operators", [])
+                # accept lists or comma strings
+                if isinstance(ops, str):
+                    ops_list = [x.strip() for x in ops.split(",") if x.strip()]
+                elif isinstance(ops, (list, tuple)):
+                    ops_list = [str(x).strip() for x in ops if str(x).strip()]
+                else:
+                    ops_list = []
+                for op in ops_list:
+                    if op and op_set and op not in op_set:
+                        errs.append(
+                            f"WARN process_steps row {i+1}: assigned operator {op!r} not found in operators"
+                        )
+        except Exception:
+            pass
+
+    # --- Overlap checks -------------------------------------------------------------
+    # Operators: overlapping labor_activity intervals per operator -> default ERROR
+    if "labor_activities" in tables:
+        try:
+            la = tables["labor_activities"].reset_index(drop=True)
+            # group by operator
+            for op, grp in la.groupby(la["operator_id"].astype(str), dropna=False):
+                intervals: list[tuple[datetime, datetime, int, str]] = []
+                for idx, row in grp.reset_index(drop=True).iterrows():
+                    start = row.get("start_time")
+                    end = row.get("end_time")
+                    # normalize pd.NaT etc.
+                    if pd.isna(start):
+                        continue
+                    if pd.isna(end) or end is None:
+                        end = datetime.max.replace(tzinfo=timezone.utc)
+                    intervals.append(
+                        (
+                            start,
+                            end,
+                            int(row.name) + 1 if hasattr(row, "name") else idx + 1,
+                            row.get("activity_id"),
+                        )
+                    )
+                if len(intervals) < 2:
+                    continue
+                intervals.sort(key=lambda x: x[0])
+                prev_s, prev_e, prev_rownum, prev_aid = intervals[0]
+                for cur_s, cur_e, cur_rownum, cur_aid in intervals[1:]:
+                    if cur_s < prev_e:
+                        errs.append(
+                            f"OVERLAP operator {op!r}: activity rows {prev_rownum}({prev_aid}) and {cur_rownum}({cur_aid}) have overlapping intervals"
+                        )
+                    if cur_e > prev_e:
+                        prev_s, prev_e, prev_rownum, prev_aid = (
+                            cur_s,
+                            cur_e,
+                            cur_rownum,
+                            cur_aid,
+                        )
+        except Exception:
+            pass
+
+    # Machines: derive machine_id per production_log row (actual_machine_id or assigned_machine from process_steps)
+    if "production_log" in tables:
+        try:
+            pl = tables["production_log"].reset_index(drop=True)
+            # build mapping from (product_id,step_id) to assigned_machine
+            step_map = {}
+            if "process_steps" in tables:
+                for _, r in tables["process_steps"].reset_index(drop=True).iterrows():
+                    key = (str(r.get("product_id") or ""), str(r.get("step_id") or ""))
+                    am = r.get("assigned_machine")
+                    if pd.isna(am):
+                        am = None
+                    step_map[key] = am
+            machine_intervals: Dict[str, list[tuple[datetime, datetime, int]]] = {}
+            for idx, r in pl.iterrows():
+                start = r.get("start_time")
+                end = r.get("end_time")
+                if pd.isna(start):
+                    continue
+                if pd.isna(end) or end is None:
+                    end = datetime.max.replace(tzinfo=timezone.utc)
+                mach = r.get("actual_machine_id")
+                if pd.isna(mach) or mach is None:
+                    # fallback to process_steps.assigned_machine
+                    key = (str(r.get("product_id") or ""), str(r.get("step_id") or ""))
+                    mach = step_map.get(key)
+                if mach is None:
+                    # no machine assigned/detected; skip but could warn
+                    continue
+                mach = str(mach)
+                machine_intervals.setdefault(mach, []).append((start, end, idx + 1))
+            # detect overlaps per machine
+            for mach, ivs in machine_intervals.items():
+                ivs.sort(key=lambda x: x[0])
+                prev_s, prev_e, prev_row = ivs[0]
+                for cur_s, cur_e, cur_row in ivs[1:]:
+                    if cur_s < prev_e:
+                        errs.append(
+                            f"OVERLAP machine {mach!r}: production_log rows {prev_row} and {cur_row} have overlapping intervals"
+                        )
+                    if cur_e > prev_e:
+                        prev_s, prev_e, prev_row = cur_s, cur_e, cur_row
+        except Exception:
+            pass
 
     # Reuse workflow dependency validator if present
     try:

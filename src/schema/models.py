@@ -116,11 +116,22 @@ class ProcessStepRow(_Row):
     @field_validator("assigned_operators", mode="before")
     @classmethod
     def _parse_ops(cls, v):
-        if v is None or v == "":
-            return []
+        # Normalize empty / NaN -> empty list
+        try:
+            import pandas as pd
+
+            if v is None or (isinstance(v, str) and not v.strip()) or pd.isna(v):
+                return []
+        except Exception:
+            if v is None or (isinstance(v, str) and not v.strip()):
+                return []
         if isinstance(v, list):
             return [str(x).strip() for x in v if str(x).strip()]
-        return [x.strip() for x in str(v).split(",") if x.strip()]
+        return [
+            x.strip()
+            for x in str(v).split(",")
+            if x.strip() and x.strip().lower() != "nan"
+        ]
 
     @field_validator("estimated_time", mode="before")
     @classmethod
@@ -132,9 +143,19 @@ class ProcessStepRow(_Row):
     @field_validator("dependency_step_id", mode="before")
     @classmethod
     def _dep(cls, v):
-        if v in (None, "", "None"):
+        # Treat NaN and common 'nan' strings as None
+        try:
+            import pandas as pd
+
+            if v is None or (isinstance(v, str) and not v.strip()) or pd.isna(v):
+                return None
+        except Exception:
+            if v is None or (isinstance(v, str) and not v.strip()):
+                return None
+        s = str(v).strip()
+        if s.lower() == "nan":
             return None
-        return str(v).strip()
+        return s
 
     @field_validator("assigned_machine")
     @classmethod
