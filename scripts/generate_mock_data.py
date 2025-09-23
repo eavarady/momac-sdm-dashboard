@@ -353,6 +353,67 @@ def generate_mock_data(
     quality_checks = pd.DataFrame(qc_rows)
     quality_checks.to_csv(DATA / "quality_checks.csv", index=False)
 
+    # Labor Activities (derive from production_log rows)
+    labor_rows = []
+    if not production_log.empty:
+        # Map each production_log to 1–2 labor activities
+        for _, r in production_log.iterrows():
+            base_start = datetime.strptime(r.start_time, "%Y-%m-%dT%H:%M:%SZ")
+            if r.end_time:
+                base_end = datetime.strptime(r.end_time, "%Y-%m-%dT%H:%M:%SZ")
+            else:
+                base_end = base_start + timedelta(minutes=random.randint(15, 120))
+
+            duration = (base_end - base_start).total_seconds()
+            splits = 1 if duration < 2700 or random.random() < 0.6 else 2
+            operators_pool = []
+            # Try to pull assigned_operators from process_steps
+            try:
+                ops_match = process_steps[
+                    (process_steps.product_id == r.product_id)
+                    & (process_steps.step_id == r.step_id)
+                ]
+                if not ops_match.empty:
+                    ops = str(ops_match.iloc[0]["assigned_operators"]).split(",")
+                    operators_pool = [o.strip() for o in ops if o.strip()]
+            except Exception:
+                pass
+            if not operators_pool:
+                operators_pool = list(operators["operator_id"])
+
+            for sidx in range(splits):
+                seg_start = base_start + timedelta(seconds=(duration / splits) * sidx)
+                seg_end = (
+                    base_end
+                    if sidx == splits - 1
+                    else seg_start + timedelta(seconds=(duration / splits))
+                )
+                act_type = random.choices(
+                    ["direct", "setup", "rework", "indirect"],
+                    weights=[0.65, 0.15, 0.05, 0.15],
+                )[0]
+                operator_id = random.choice(operators_pool)
+                labor_rows.append(
+                    {
+                        "activity_id": f"ACT-{r.run_id or 'NA'}-{r.step_id}-{sidx}-{random.randint(1000,9999)}",
+                        "operator_id": operator_id,
+                        "product_id": r.product_id,
+                        "step_id": r.step_id,
+                        "run_id": r.run_id,
+                        "line_id": r.line_id,
+                        "start_time": seg_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "end_time": (
+                            ""
+                            if r.status == "in_progress" and sidx == splits - 1
+                            else seg_end.strftime("%Y-%m-%dT%H:%M:%SZ")
+                        ),
+                        "activity_type": act_type,
+                    }
+                )
+
+    labor_activities = pd.DataFrame(labor_rows)
+    labor_activities.to_csv(DATA / "labor_activities.csv", index=False)
+
     print("Mock CSV dataset generated into data/ (schema-aligned).")
 
 

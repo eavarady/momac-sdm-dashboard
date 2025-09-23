@@ -308,3 +308,76 @@ class QualityCheckRow(_Row):
         if v is None:
             return None
         return str(v).strip() or None
+
+
+#  New table: columns: activity_id (or derive), operator_id, product_id, step_id, run_id (optional), line_id (optional), start_time, end_time (nullable for in_progress), activity_type (direct/setup/rework/indirect).
+class LaborActivityRow(_Row):
+    activity_id: Optional[str] = None
+    operator_id: str
+    product_id: str
+    step_id: str
+    run_id: Optional[str] = None
+    line_id: Optional[str] = None
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    activity_type: Literal["direct", "setup", "rework", "indirect"]
+
+    @field_validator(
+        "activity_id",
+        "operator_id",
+        "product_id",
+        "step_id",
+        "run_id",
+        "line_id",
+        mode="before",
+    )
+    @classmethod
+    def _strip_nullable(cls, v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+
+    @field_validator("start_time", mode="before")
+    @classmethod
+    def _ts_required(cls, v):
+        return _parse_utc(v)
+
+    @field_validator("end_time", mode="before")
+    @classmethod
+    def _ts_optional(cls, v):
+        try:
+            import pandas as pd
+
+            if v is None or (isinstance(v, str) and not v.strip()) or pd.isna(v):
+                return None
+        except Exception:
+            if v is None or (isinstance(v, str) and not v.strip()):
+                return None
+        return _parse_utc(v)
+
+    @field_validator("activity_type", mode="before")
+    @classmethod
+    def _activity_type_norm(cls, v):
+        s = str(v).strip().lower()
+        allowed = {"direct", "setup", "rework", "indirect"}
+        if s not in allowed:
+            raise ValueError(
+                f"invalid activity_type '{s}' (allowed: direct, setup, rework, indirect)"
+            )
+        return s
+
+    @field_validator("activity_id")
+    @classmethod
+    def _require_activity_id(cls, v):
+        if v is None or v == "":
+            raise ValueError("activity_id is required for labor_activities")
+        return v
+
+    @field_validator("end_time")
+    @classmethod
+    def _check_time_logic(cls, end, info):
+        start = info.data.get("start_time")
+        if end is not None and start is not None and end < start:
+            raise ValueError("end_time must be >= start_time if provided")
+        return end

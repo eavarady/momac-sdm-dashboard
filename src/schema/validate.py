@@ -13,6 +13,7 @@ from schema.models import (
     MachineMetricRow,
     QualityCheckRow,
     RunsRow,
+    LaborActivityRow,  # <-- add
 )
 
 # Map logical table name -> (pydantic model, required columns for friendly messages)
@@ -56,6 +57,20 @@ TABLE_REGISTRY: Dict[str, Tuple[Type[BaseModel], Tuple[str, ...]]] = {
     ),
     # Preferred runs table: planned quantities per run (supersedes production_targets)
     "runs": (RunsRow, ("run_id", "planned_qty")),
+    "labor_activities": (  # <-- add
+        LaborActivityRow,
+        (
+            "activity_id",
+            "operator_id",
+            "product_id",
+            "step_id",
+            "run_id",
+            "line_id",
+            "start_time",
+            "end_time",
+            "activity_type",
+        ),
+    ),
 }
 
 
@@ -136,6 +151,12 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
             ["run_id"],
             "runs.run_id",
         )
+    if "labor_activities" in tables:  # uniqueness
+        dup_errors(
+            tables["labor_activities"],
+            ["activity_id"],
+            "labor_activities.activity_id",
+        )
 
     # FKs
     if {"production_log", "process_steps"} <= tables.keys():
@@ -205,6 +226,56 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
             if pid not in pset:
                 errs.append(
                     f"FK quality_checks row {i+1}: product_id {pid!r} not found in products"
+                )
+
+    if {"labor_activities", "operators"} <= tables.keys():
+        op_set = set(tables["operators"]["operator_id"].astype(str))
+        for i, r in tables["labor_activities"].reset_index(drop=True).iterrows():
+            oid = str(r.get("operator_id", ""))
+            if oid not in op_set:
+                errs.append(
+                    f"FK labor_activities row {i+1}: operator_id {oid!r} not found in operators"
+                )
+
+    if {"labor_activities", "products"} <= tables.keys():
+        pset = set(tables["products"]["product_id"].astype(str))
+        for i, r in tables["labor_activities"].reset_index(drop=True).iterrows():
+            pid = str(r.get("product_id", ""))
+            if pid not in pset:
+                errs.append(
+                    f"FK labor_activities row {i+1}: product_id {pid!r} not found in products"
+                )
+
+    if {"labor_activities", "process_steps"} <= tables.keys():
+        step_keys = set(
+            zip(
+                tables["process_steps"]["product_id"].astype(str),
+                tables["process_steps"]["step_id"].astype(str),
+            )
+        )
+        for i, r in tables["labor_activities"].reset_index(drop=True).iterrows():
+            key = (str(r.get("product_id", "")), str(r.get("step_id", "")))
+            if key not in step_keys:
+                errs.append(
+                    f"FK labor_activities row {i+1}: step not found in process_steps (product_id={key[0]!r}, step_id={key[1]!r})"
+                )
+
+    if {"labor_activities", "runs"} <= tables.keys():
+        run_set = set(tables["runs"]["run_id"].astype(str))
+        for i, r in tables["labor_activities"].reset_index(drop=True).iterrows():
+            rid = r.get("run_id")
+            if pd.notna(rid) and str(rid) not in run_set:
+                errs.append(
+                    f"FK labor_activities row {i+1}: run_id {str(rid)!r} not found in runs"
+                )
+
+    if {"labor_activities", "production_lines"} <= tables.keys():
+        line_set = set(tables["production_lines"]["line_id"].astype(str))
+        for i, r in tables["labor_activities"].reset_index(drop=True).iterrows():
+            lid = r.get("line_id")
+            if pd.notna(lid) and str(lid) not in line_set:
+                errs.append(
+                    f"FK labor_activities row {i+1}: line_id {str(lid)!r} not found in production_lines"
                 )
 
     # Reuse workflow dependency validator if present
