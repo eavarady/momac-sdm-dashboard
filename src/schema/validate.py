@@ -28,7 +28,8 @@ TABLE_REGISTRY: Dict[str, Tuple[Type[BaseModel], Tuple[str, ...]]] = {
             "product_id",
             "step_id",
             "step_name",
-            "assigned_machine",
+            "requires_machine",
+            # assigned_machine intentionally NOT required (conditional)
             "assigned_operators",
             "estimated_time",
             "dependency_step_id",

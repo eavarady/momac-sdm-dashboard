@@ -97,7 +97,8 @@ class ProcessStepRow(_Row):
     product_id: str = Field(min_length=1)
     step_id: str = Field(min_length=1)
     step_name: str = Field(default="")
-    assigned_machine: str = Field(default="")
+    requires_machine: bool = Field(default=True)
+    assigned_machine: str | None = Field(default=None)
     assigned_operators: List[str] = Field(default_factory=list)
     estimated_time: int = Field(ge=0, default=0)
     dependency_step_id: Optional[str] = None
@@ -107,8 +108,10 @@ class ProcessStepRow(_Row):
     )
     @classmethod
     def _strip(cls, v):
-        s = "" if v is None else str(v)
-        return s.strip()
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
 
     @field_validator("assigned_operators", mode="before")
     @classmethod
@@ -155,6 +158,17 @@ class ProcessStepRow(_Row):
         step_id = info.data.get("step_id", "")
         return step_id
 
+    @field_validator("assigned_machine")
+    @classmethod
+    def _assigned_machine_required_if_needed(cls, v, info):
+        requires = info.data.get("requires_machine", True)
+        if requires and not v:
+            raise ValueError("assigned_machine required when requires_machine=True")
+        # Normalize blank to None when not required
+        if not requires and not v:
+            return None
+        return v
+
 
 # ---- Fact tables ------------------------------------------------------------
 
@@ -198,6 +212,7 @@ class ProductionLogRow(_Row):
     run_id: Optional[str] = None
     quantity: int = Field(ge=0)
     status: Literal["in_progress", "complete"]
+    actual_machine_id: Optional[str] = None
 
     @field_validator("timestamp", "start_time", mode="before")
     @classmethod
