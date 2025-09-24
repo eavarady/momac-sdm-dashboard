@@ -55,13 +55,13 @@ _panel_opacity = 0.88  # panel translucency (0..1)
 _overlay_alpha = 0.45  # grey overlay strength (0..1)
 
 # Debug: show whether file exists (remove in production)
-if st.session_state.get("_debug_bg", True):
-    st.write("Background image:", str(_img_path), "exists=", _img_path.exists())
-    try:
-        if _img_path.exists():
-            st.write("Background size (bytes):", _img_path.stat().st_size)
-    except Exception:
-        pass
+# if st.session_state.get("_debug_bg", True):
+# st.write("Background image:", str(_img_path), "exists=", _img_path.exists())
+# try:
+# if _img_path.exists():
+# st.write("Background size (bytes):", _img_path.stat().st_size)
+# except Exception:
+# pass
 
 if _img_path.exists():
     b64 = base64.b64encode(_img_path.read_bytes()).decode()
