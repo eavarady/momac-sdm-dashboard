@@ -46,53 +46,6 @@ pd.set_option("future.no_silent_downcasting", True)
 
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
-# Add subtle grey overlay over background image (uses data/background.png if present)
-from pathlib import Path
-import base64
-
-# SaudiequipVisit2.jpg lives at the repository root (two parents above this file)
-_img_path = Path(__file__).resolve().parents[2] / "SaudiequipVisit2.jpg"
-# panel/overlay settings
-_panel_opacity = 0.88  # panel translucency (0..1)
-_overlay_alpha = 0.45  # grey overlay strength (0..1)
-
-# Debug: show whether file exists (remove in production)
-# if st.session_state.get("_debug_bg", True):
-# st.write("Background image:", str(_img_path), "exists=", _img_path.exists())
-# try:
-# if _img_path.exists():
-# st.write("Background size (bytes):", _img_path.stat().st_size)
-# except Exception:
-# pass
-
-if _img_path.exists():
-    b64 = base64.b64encode(_img_path.read_bytes()).decode()
-    # determine mime from suffix
-    mime = (
-        "image/jpeg" if _img_path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
-    )
-    _data_url = f"data:{mime};base64,{b64}"
-    st.markdown(
-        f"""
-        <style>
-          /* Apply background directly to the app container (more robust across Streamlit versions) */
-          .stApp {{
-            background-image: linear-gradient(rgba(64,64,64,{_overlay_alpha}), rgba(64,64,64,{_overlay_alpha})), url("{_data_url}");
-            background-size: cover;
-            background-position: center;
-            background-attachment: fixed;
-          }}
-          .stApp .main .block-container {{
-            background-color: rgba(255,255,255,{_panel_opacity}) !important;
-            box-shadow: none !important;
-          }}
-          .stApp .sidebar .sidebar-content {{
-            background-color: rgba(255,255,255,{_panel_opacity}) !important;
-          }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
 st.title("MOMAC SDM Dashboard")
 
