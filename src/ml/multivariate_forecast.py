@@ -43,6 +43,8 @@ from .ts_utils import (
 
 SUPPORTED_FEATURES = {
     "defect_rate_pct",
+    "shift_night_share",
+    "avg_energy_consumption",
 }
 
 MIN_NON_NULL = 3
@@ -172,6 +174,71 @@ def _compute_feature_series(
                 feats["defect_rate_pct"] = pd.Series([defect_rate] * len(ds_index), index=ds_index)
         else:
             feats["defect_rate_pct"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
+
+    # shift_night_share: fraction of production events that occurred on 'night' shift
+    if "shift_night_share" in included:
+        pl = tables.get("production_log", pd.DataFrame())
+        lines = tables.get("production_lines", pd.DataFrame())
+        if (
+            not pl.empty
+            and "line_id" in pl.columns
+            and not lines.empty
+            and {"line_id", "shift"}.issubset(lines.columns)
+        ):
+            ts_col_pl = _find_timestamp_column(pl)
+            if ts_col_pl:
+                tmp = pl.copy()
+                tmp[ts_col_pl] = _safe_dt(tmp[ts_col_pl])
+                tmp = tmp.dropna(subset=[ts_col_pl])
+                if not tmp.empty:
+                    tmp = tmp.merge(
+                        lines[["line_id", "shift"]].copy(), on="line_id", how="left"
+                    )
+                    tmp["shift_norm"] = tmp["shift"].astype(str).str.lower()
+                    tmp.set_index(ts_col_pl, inplace=True)
+                    if getattr(tmp.index, "tz", None) is not None:
+                        tmp.index = tmp.index.tz_convert("UTC").tz_localize(None)
+                    grp = tmp.resample(freq).agg(
+                        total=("shift_norm", "count"),
+                        night=("shift_norm", lambda s: (s == "night").sum()),
+                    )
+                    grp["shift_night_share"] = grp["night"] / grp["total"].clip(lower=1)
+                    series = grp["shift_night_share"].reindex(pd.DatetimeIndex(ds_index))
+                    series = series.ffill().bfill()
+                    feats["shift_night_share"] = series.astype(float)
+                else:
+                    feats["shift_night_share"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
+            else:
+                feats["shift_night_share"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
+        else:
+            feats["shift_night_share"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
+
+    # avg_energy_consumption: mean energy_consumption metric per period across all machines
+    if "avg_energy_consumption" in included:
+        mm = tables.get("machine_metrics", pd.DataFrame())
+        if not mm.empty and {"metric_type", "metric_value"}.issubset(mm.columns):
+            ts_col_mm = _find_timestamp_column(mm)
+            if ts_col_mm:
+                tmpm = mm[mm["metric_type"].astype(str).str.lower() == "energy_consumption"].copy()
+                if not tmpm.empty:
+                    tmpm[ts_col_mm] = _safe_dt(tmpm[ts_col_mm])
+                    tmpm = tmpm.dropna(subset=[ts_col_mm])
+                    if not tmpm.empty:
+                        tmpm.set_index(ts_col_mm, inplace=True)
+                        if getattr(tmpm.index, "tz", None) is not None:
+                            tmpm.index = tmpm.index.tz_convert("UTC").tz_localize(None)
+                        grp = tmpm["metric_value"].resample(freq).mean()
+                        series = grp.reindex(pd.DatetimeIndex(ds_index)).astype(float)
+                        series = series.ffill().bfill()
+                        feats["avg_energy_consumption"] = series
+                    else:
+                        feats["avg_energy_consumption"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
+                else:
+                    feats["avg_energy_consumption"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
+            else:
+                feats["avg_energy_consumption"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
+        else:
+            feats["avg_energy_consumption"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
 
     if not feats:
         return pd.DataFrame(index=ds_index)

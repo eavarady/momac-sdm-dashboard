@@ -630,7 +630,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
     st.markdown("---")
     st.subheader("Scenario Variables")
     st.caption(
-        "Currently only defect rate % is available (others removed until temporal history exists)."
+        "Select variables to include in the model. Historical values are derived from data; your inputs apply only to future periods."
     )
 
     # Determine simple defaults from data (if available)
@@ -669,6 +669,8 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
     # Friendly label -> internal feature key mapping (internal keys stay stable for modeling)
     FEATURE_LABELS = {
         "Defect rate %": "defect_rate_pct",
+        "Night shift share": "shift_night_share",
+        "Avg energy consumption": "avg_energy_consumption",
     }
 
     col_vars1, col_vars2 = st.columns(2)
@@ -677,16 +679,25 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             "Defect rate %",
             value=False,
             key="mv_inc_defect",
-            help="Feature key: defect_rate_pct",
+            help="Feature key: defect_rate_pct (fails/total * 100)",
+        )
+        inc_shift_night = st.checkbox(
+            "Night shift share",
+            value=False,
+            key="mv_inc_shift_night",
+            help="Feature key: shift_night_share (night events / total events)",
         )
     with col_vars2:
-        st.write("")
+        inc_energy = st.checkbox(
+            "Avg energy consumption",
+            value=False,
+            key="mv_inc_energy",
+            help="Feature key: avg_energy_consumption (mean energy metric)",
+        )
 
     # Inputs for selected variables
     col_inputs1, col_inputs2 = st.columns(2)
     with col_inputs1:
-        pass
-    with col_inputs2:
         if inc_defect_rate:
             defect_rate_pct = st.slider(
                 "Assumed Defect Rate %",
@@ -695,6 +706,57 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                 value=float(round(default_defect_rate, 2)),
                 step=0.5,
                 key="mv_defect_rate",
+            )
+        if inc_shift_night:
+            # Derive default from historic proportion (approx) if production_log + lines available
+            prod_log_hist = _tables.get("production_log", pd.DataFrame())
+            lines_hist = _tables.get("production_lines", pd.DataFrame())
+            if (
+                not prod_log_hist.empty
+                and "line_id" in prod_log_hist.columns
+                and not lines_hist.empty
+                and {"line_id", "shift"}.issubset(lines_hist.columns)
+            ):
+                merged_ln = prod_log_hist.merge(
+                    lines_hist[["line_id", "shift"]], on="line_id", how="left"
+                )
+                night_share_default = (
+                    (merged_ln["shift"].astype(str).str.lower() == "night").sum()
+                    / max(1, len(merged_ln))
+                )
+            else:
+                night_share_default = 0.0
+            shift_night_share = st.slider(
+                "Assumed Night Shift Share",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(round(night_share_default, 2)),
+                step=0.01,
+                key="mv_shift_night_share",
+            )
+    with col_inputs2:
+        if inc_energy:
+            mm_hist = _tables.get("machine_metrics", pd.DataFrame())
+            if (
+                not mm_hist.empty
+                and {"metric_type", "metric_value"}.issubset(mm_hist.columns)
+            ):
+                energy_vals = mm_hist[
+                    mm_hist["metric_type"].astype(str).str.lower()
+                    == "energy_consumption"
+                ]["metric_value"].astype(float)
+                energy_default = float(
+                    round(energy_vals.mean(), 2)
+                ) if not energy_vals.empty else 0.0
+            else:
+                energy_default = 0.0
+            avg_energy_consumption = st.slider(
+                "Assumed Avg Energy Consumption",
+                min_value=0.0,
+                max_value=float(max(10.0, energy_default * 3 or 100.0)),
+                value=energy_default,
+                step=0.1,
+                key="mv_avg_energy_consumption",
             )
 
     st.markdown("---")
@@ -713,6 +775,14 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             fk = FEATURE_LABELS["Defect rate %"]
             scenario["included_variables"].append(fk)
             scenario["assumptions"][fk] = defect_rate_pct
+        if 'inc_shift_night' in locals() and inc_shift_night:
+            fk = FEATURE_LABELS["Night shift share"]
+            scenario["included_variables"].append(fk)
+            scenario["assumptions"][fk] = shift_night_share
+        if 'inc_energy' in locals() and inc_energy:
+            fk = FEATURE_LABELS["Avg energy consumption"]
+            scenario["included_variables"].append(fk)
+            scenario["assumptions"][fk] = avg_energy_consumption
         st.session_state["multivariate_scenario"] = scenario
         try:
             mv_path = "multivariate_forecasted_data.csv"
