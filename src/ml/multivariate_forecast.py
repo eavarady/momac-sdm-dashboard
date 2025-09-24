@@ -46,6 +46,16 @@ SUPPORTED_FEATURES = {
     "shift_night_share",
     "avg_energy_consumption",
     "wip_proxy",
+    "inspection_intensity",
+}
+
+# Friendly label -> internal feature key mapping (single source of truth)
+FEATURE_LABELS = {
+    "Defect rate %": "defect_rate_pct",
+    "Night shift share": "shift_night_share",
+    "Avg energy consumption": "avg_energy_consumption",
+    "WIP proxy (fraction)": "wip_proxy",
+    "Inspection coverage": "inspection_intensity",
 }
 
 MIN_NON_NULL = 3
@@ -270,9 +280,182 @@ def _compute_feature_series(
         else:
             feats["wip_proxy"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
 
+    # inspection_intensity: inspection coverage = inspected_units / produced_units (0..1)
+    if "inspection_intensity" in included:
+        qc = tables.get("quality_checks", pd.DataFrame())
+        pl_prod = tables.get("production_log", pd.DataFrame())
+        ts_qc = _find_timestamp_column(qc) if not qc.empty else None
+        ts_pl = _find_timestamp_column(pl_prod) if not pl_prod.empty else None
+        if qc is not None and not qc.empty and ts_qc and pl_prod is not None and not pl_prod.empty and ts_pl:
+            qcc = qc.copy()
+            qcc[ts_qc] = _safe_dt(qcc[ts_qc])
+            qcc = qcc.dropna(subset=[ts_qc])
+            plc = pl_prod.copy()
+            plc[ts_pl] = _safe_dt(plc[ts_pl])
+            plc = plc.dropna(subset=[ts_pl])
+            if not qcc.empty and not plc.empty:
+                # Set indices
+                qcc.set_index(ts_qc, inplace=True)
+                plc.set_index(ts_pl, inplace=True)
+                if getattr(qcc.index, "tz", None) is not None:
+                    qcc.index = qcc.index.tz_convert("UTC").tz_localize(None)
+                if getattr(plc.index, "tz", None) is not None:
+                    plc.index = plc.index.tz_convert("UTC").tz_localize(None)
+                # Determine inspected units: prefer unit_id, else run_id, else row count
+                inspected_col = None
+                for c in ("unit_id", "run_id"):
+                    if c in qcc.columns:
+                        inspected_col = c
+                        break
+                if inspected_col:
+                    qc_grp = qcc.resample(freq).agg(inspected=(inspected_col, "nunique"))
+                else:
+                    qc_grp = qcc.resample(freq).agg(inspected=(qcc.columns[0], "count"))
+                # Produced units: prefer completed events if status present, else total events
+                if "status" in plc.columns:
+                    plc["_status_norm"] = plc["status"].astype(str).str.lower()
+                    plc["__complete_flag"] = (plc["_status_norm"] == "complete").astype(int)
+                    prod_grp = plc.resample(freq).agg(produced=("__complete_flag", "sum"))
+                else:
+                    # count all rows
+                    prod_grp = plc.resample(freq).size().to_frame(name="produced")
+                coverage = qc_grp.join(prod_grp, how="outer")
+                # Fill missing counts with 0 then compute coverage; when produced==0 define coverage=0 (avoid NaN propagation)
+                coverage["inspected"] = coverage["inspected"].fillna(0).astype(float)
+                coverage["produced"] = coverage["produced"].fillna(0).astype(float)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    cov_vals = np.where(
+                        coverage["produced"] > 0,
+                        coverage["inspected"] / coverage["produced"],
+                        0.0,
+                    )
+                coverage["inspection_intensity"] = cov_vals
+                # Clip to [0,1] just in case inspected > produced due to counting differences
+                coverage["inspection_intensity"] = coverage["inspection_intensity"].clip(lower=0.0, upper=1.0)
+                series = coverage["inspection_intensity"].reindex(pd.DatetimeIndex(ds_index)).fillna(0.0)
+                feats["inspection_intensity"] = series.astype(float)
+            else:
+                feats["inspection_intensity"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
+        else:
+            feats["inspection_intensity"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
+
     if not feats:
         return pd.DataFrame(index=ds_index)
     return pd.DataFrame(feats)
+
+
+def compute_feature_defaults(tables: Dict[str, pd.DataFrame]) -> Dict[str, float]:
+    """Compute baseline default values for each supported feature from raw tables.
+
+    Returns
+    -------
+    dict
+        Mapping internal feature key -> default numeric value.
+    """
+    defaults: Dict[str, float] = {}
+
+    # Defect rate % overall snapshot (fails / total * 100)
+    qc = tables.get("quality_checks", pd.DataFrame())
+    if not qc.empty and "result" in qc.columns:
+        total_q = len(qc)
+        fails = qc["result"].astype(str).str.lower().eq("fail").sum()
+        defaults["defect_rate_pct"] = (fails / max(1, total_q)) * 100.0
+    else:
+        defaults["defect_rate_pct"] = 5.0  # fallback heuristic
+
+    # Night shift share (overall fraction of events on night shift)
+    pl = tables.get("production_log", pd.DataFrame())
+    lines = tables.get("production_lines", pd.DataFrame())
+    if (
+        not pl.empty
+        and "line_id" in pl.columns
+        and not lines.empty
+        and {"line_id", "shift"}.issubset(lines.columns)
+    ):
+        ts_col = _find_timestamp_column(pl)
+        tmp = pl.copy()
+        if ts_col and ts_col in tmp.columns:
+            tmp[ts_col] = _safe_dt(tmp[ts_col])
+        if "line_id" in tmp.columns:
+            tmp = tmp.merge(lines[["line_id", "shift"]].copy(), on="line_id", how="left")
+        if not tmp.empty and "shift" in tmp.columns:
+            shift_norm = tmp["shift"].astype(str).str.lower()
+            defaults["shift_night_share"] = float((shift_norm == "night").sum() / max(1, len(shift_norm)))
+        else:
+            defaults["shift_night_share"] = 0.0
+    else:
+        defaults["shift_night_share"] = 0.0
+
+    # Avg energy consumption (mean of energy_consumption metric)
+    mm = tables.get("machine_metrics", pd.DataFrame())
+    if not mm.empty and {"metric_type", "metric_value"}.issubset(mm.columns):
+        energy_vals = mm[mm["metric_type"].astype(str).str.lower() == "energy_consumption"]["metric_value"].astype(float)
+        defaults["avg_energy_consumption"] = float(round(energy_vals.mean(), 2)) if not energy_vals.empty else 0.0
+    else:
+        defaults["avg_energy_consumption"] = 0.0
+
+    # WIP proxy overall fraction of in_progress events
+    if not pl.empty and {"status"}.issubset(pl.columns):
+        status_norm = pl["status"].astype(str).str.lower()
+        defaults["wip_proxy"] = float(round((status_norm == "in_progress").sum() / max(1, len(status_norm)), 2))
+    else:
+        defaults["wip_proxy"] = 0.0
+
+    # Inspection coverage overall snapshot: inspected unique units (unit_id/run_id) / completed events
+    qc2 = qc
+    pl2 = pl
+    if (
+        not qc2.empty
+        and not pl2.empty
+        and "status" in pl2.columns
+    ):
+        inspected_col = None
+        for c in ("unit_id", "run_id"):
+            if c in qc2.columns:
+                inspected_col = c
+                break
+        if inspected_col:
+            inspected_units = qc2[inspected_col].nunique()
+        else:
+            inspected_units = len(qc2)
+        completed = pl2["status"].astype(str).str.lower().eq("complete").sum()
+        if completed > 0:
+            defaults["inspection_intensity"] = float(round(inspected_units / max(1, completed), 2))
+        else:
+            defaults["inspection_intensity"] = 0.0
+    else:
+        defaults["inspection_intensity"] = 0.0
+
+    return defaults
+
+
+def validate_and_normalize_scenario(
+    scenario: Dict,
+    tables: Dict[str, pd.DataFrame],
+) -> Dict:
+    """Validate and normalize scenario dict.
+
+    Ensures included_variables are supported, assumptions are floats, and returns a cleaned copy.
+    Does NOT fill in missing assumptions (UI supplies them), but could in future.
+    """
+    cleaned = dict(scenario)  # shallow copy
+    included = [v for v in cleaned.get("included_variables", []) if v in SUPPORTED_FEATURES]
+    cleaned["included_variables"] = included
+    # Cast assumptions to float when possible
+    assumptions = cleaned.get("assumptions", {}) or {}
+    norm_assumptions: Dict[str, float] = {}
+    for k, v in assumptions.items():
+        if k in included:
+            try:
+                norm_assumptions[k] = float(v)
+            except Exception:
+                # keep original if non-castable; model layer may raise later
+                norm_assumptions[k] = v
+    cleaned["assumptions"] = norm_assumptions
+    if not included:
+        # preserve original behavior: raise upstream later; we keep here so run_multivariate_forecast can raise a clear error
+        pass
+    return cleaned
 
 
 def _evaluate_feature_adequacy(feat_hist: pd.DataFrame, categorical: Sequence[str]) -> Tuple[bool, Dict[str, str], Dict[str, Dict[str, float]]]:
@@ -341,6 +524,9 @@ def run_multivariate_forecast(
             adapt_horizon=scenario.get("adapt_horizon", True),
             horizon_multiplier=scenario.get("horizon_multiplier", 1.0),
         )
+
+    # Normalize scenario first
+    scenario = validate_and_normalize_scenario(scenario, tables)
 
     horizon = int(scenario.get("horizon", 30))
     included = [v for v in scenario.get("included_variables", []) if v in SUPPORTED_FEATURES]
@@ -532,6 +718,18 @@ def run_multivariate_forecast(
         "percent_std": 0.5,
         "min_unique_flag": 2,
     }
+    # Measurement ambiguity (pairs of features that can overlap in explanatory power)
+    ambiguity_pairs = []
+    if {"inspection_intensity", "defect_rate_pct"}.issubset(set(included)):
+        ambiguity_pairs.append(["inspection_intensity", "defect_rate_pct"])
+    if ambiguity_pairs:
+        influence_meta["measurement_ambiguity"] = ambiguity_pairs
+    influence_meta["thresholds"] = {
+        "coef_influence_eps": COEF_INFLUENCE_EPS,
+        "min_train_for_influence": MIN_TRAIN_FOR_INFLUENCE,
+        "min_non_null": MIN_NON_NULL,
+        "min_distinct": MIN_DISTINCT,
+    }
 
     # Residual stddev for intervals
     if len(y_train) > 2:
@@ -589,4 +787,10 @@ def run_multivariate_forecast(
     return forecast
 
 
-__all__ = ["run_multivariate_forecast", "ForecastFeatureAdequacyError"]
+__all__ = [
+    "run_multivariate_forecast",
+    "ForecastFeatureAdequacyError",
+    "compute_feature_defaults",
+    "validate_and_normalize_scenario",
+    "FEATURE_LABELS",
+]

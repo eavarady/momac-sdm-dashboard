@@ -32,6 +32,8 @@ from ml.linear_forecast import linear_forecast
 from ml.multivariate_forecast import (
     run_multivariate_forecast,
     ForecastFeatureAdequacyError,
+    compute_feature_defaults,
+    FEATURE_LABELS,
 )
 from utils.date_ranges import compute_preset_range
 from export.csv_exporter import to_csv_bytes, safe_filename
@@ -633,46 +635,13 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
         "Select variables to include in the model. Historical values are derived from data; your inputs apply only to future periods."
     )
 
-    # Determine simple defaults from data (if available)
-    machines_df = _tables.get("machines", pd.DataFrame())
-    quality_df = _tables.get("quality_checks", pd.DataFrame())
-    prod_log_df = _tables.get("production_log", pd.DataFrame())
-    operators_df = _tables.get("operators", pd.DataFrame())
-
-    # Operator count default
-    # operator_count removed until temporal history exists
-
-    # Defect rate default (fail / total *100)
-    if not quality_df.empty and {"result"}.issubset(quality_df.columns):
-        total_q = len(quality_df)
-        fails = (quality_df["result"].str.lower() == "fail").sum()
-        default_defect_rate = (fails / max(1, total_q)) * 100.0
-    else:
-        default_defect_rate = 5.0
-
-    # Shift type heuristic (most common shift or day if absent)
-    lines_df = _tables.get("production_lines", pd.DataFrame())
-    if not lines_df.empty and {"shift"}.issubset(lines_df.columns):
-        shift_col = lines_df["shift"].dropna().astype(str)
-        # Unique observed shift options
-        shift_options = sorted(shift_col.unique().tolist())
-        # Safe mode(): may be empty after dropna
-        common_shift = (
-            shift_col.mode().iloc[0]
-            if not shift_col.mode().empty
-            else (shift_options[0] if shift_options else "day")
-        )
-    else:
-        shift_options = ["day", "night"]
-        common_shift = "day"
-
-    # Friendly label -> internal feature key mapping (internal keys stay stable for modeling)
-    FEATURE_LABELS = {
-        "Defect rate %": "defect_rate_pct",
-        "Night shift share": "shift_night_share",
-        "Avg energy consumption": "avg_energy_consumption",
-    "WIP proxy (fraction)": "wip_proxy",
-    }
+    # Centralized defaults & label mapping now provided by ml.multivariate_forecast
+    _mv_defaults = compute_feature_defaults(_tables)
+    default_defect_rate = _mv_defaults.get("defect_rate_pct", 5.0)
+    night_share_default = _mv_defaults.get("shift_night_share", 0.0)
+    energy_default = _mv_defaults.get("avg_energy_consumption", 0.0)
+    wip_default = _mv_defaults.get("wip_proxy", 0.0)
+    cov_default = _mv_defaults.get("inspection_intensity", 0.0)
 
     col_vars1, col_vars2 = st.columns(2)
     with col_vars1:
@@ -687,6 +656,12 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             value=False,
             key="mv_inc_shift_night",
             help="Feature key: shift_night_share (night events / total events)",
+        )
+        inc_inspection = st.checkbox(
+            "Inspection coverage",
+            value=False,
+            key="mv_inc_inspection_cov",
+            help="Feature key: inspection_intensity (inspected units / produced units)",
         )
     with col_vars2:
         inc_energy = st.checkbox(
@@ -714,49 +689,28 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                 step=0.5,
                 key="mv_defect_rate",
             )
-        if inc_shift_night:
-            # Derive default from historic proportion (approx) if production_log + lines available
-            prod_log_hist = _tables.get("production_log", pd.DataFrame())
-            lines_hist = _tables.get("production_lines", pd.DataFrame())
-            if (
-                not prod_log_hist.empty
-                and "line_id" in prod_log_hist.columns
-                and not lines_hist.empty
-                and {"line_id", "shift"}.issubset(lines_hist.columns)
-            ):
-                merged_ln = prod_log_hist.merge(
-                    lines_hist[["line_id", "shift"]], on="line_id", how="left"
+    if inc_shift_night:
+            with col_inputs1:
+                shift_night_share = st.slider(
+                    "Assumed Night Shift Share",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=float(round(night_share_default, 2)),
+                    step=0.01,
+                    key="mv_shift_night_share",
                 )
-                night_share_default = (
-                    (merged_ln["shift"].astype(str).str.lower() == "night").sum()
-                    / max(1, len(merged_ln))
+    if inc_inspection:
+            with col_inputs1:
+                inspection_cov = st.slider(
+                    "Assumed Inspection Coverage (fraction)",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=cov_default,
+                    step=0.01,
+                    key="mv_inspection_cov",
                 )
-            else:
-                night_share_default = 0.0
-            shift_night_share = st.slider(
-                "Assumed Night Shift Share",
-                min_value=0.0,
-                max_value=1.0,
-                value=float(round(night_share_default, 2)),
-                step=0.01,
-                key="mv_shift_night_share",
-            )
     with col_inputs2:
         if inc_energy:
-            mm_hist = _tables.get("machine_metrics", pd.DataFrame())
-            if (
-                not mm_hist.empty
-                and {"metric_type", "metric_value"}.issubset(mm_hist.columns)
-            ):
-                energy_vals = mm_hist[
-                    mm_hist["metric_type"].astype(str).str.lower()
-                    == "energy_consumption"
-                ]["metric_value"].astype(float)
-                energy_default = float(
-                    round(energy_vals.mean(), 2)
-                ) if not energy_vals.empty else 0.0
-            else:
-                energy_default = 0.0
             avg_energy_consumption = st.slider(
                 "Assumed Avg Energy Consumption",
                 min_value=0.0,
@@ -766,14 +720,6 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                 key="mv_avg_energy_consumption",
             )
         if inc_wip_proxy:
-            # derive default as historical mean fraction
-            pl_hist = _tables.get("production_log", pd.DataFrame())
-            if not pl_hist.empty and {"status"}.issubset(pl_hist.columns):
-                status_norm = pl_hist["status"].astype(str).str.lower()
-                # crude fraction across entire history (not periodized) just for a starting point
-                wip_default = float(round((status_norm == "in_progress").sum() / max(1, len(status_norm)), 2))
-            else:
-                wip_default = 0.0
             wip_proxy_val = st.slider(
                 "Assumed WIP Proxy (fraction)",
                 min_value=0.0,
@@ -799,18 +745,31 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             fk = FEATURE_LABELS["Defect rate %"]
             scenario["included_variables"].append(fk)
             scenario["assumptions"][fk] = defect_rate_pct
-        if 'inc_shift_night' in locals() and inc_shift_night:
+        if inc_shift_night:
             fk = FEATURE_LABELS["Night shift share"]
             scenario["included_variables"].append(fk)
             scenario["assumptions"][fk] = shift_night_share
-        if 'inc_energy' in locals() and inc_energy:
+        if inc_energy:
             fk = FEATURE_LABELS["Avg energy consumption"]
             scenario["included_variables"].append(fk)
             scenario["assumptions"][fk] = avg_energy_consumption
-        if 'inc_wip_proxy' in locals() and inc_wip_proxy:
+        if inc_wip_proxy:
             fk = FEATURE_LABELS["WIP proxy (fraction)"]
             scenario["included_variables"].append(fk)
             scenario["assumptions"][fk] = wip_proxy_val
+        if inc_inspection:
+            fk = FEATURE_LABELS["Inspection coverage"]
+            scenario["included_variables"].append(fk)
+            scenario["assumptions"][fk] = inspection_cov
+        # Debug safeguard: if inclusion unexpectedly empty but a checkbox was selected
+        if not scenario["included_variables"] and any([
+            inc_defect_rate,
+            inc_shift_night,
+            inc_energy,
+            inc_wip_proxy,
+            inc_inspection,
+        ]):
+            st.warning("Debug: Scenario variable selection detected but inclusion list empty. Please rerun; if persists report a bug.")
         st.session_state["multivariate_scenario"] = scenario
         try:
             mv_path = "multivariate_forecasted_data.csv"
@@ -873,6 +832,13 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                         )
                     st.warning(
                         "Low historical variation: the following scenario variable(s) had near-constant historical values and the model had little information to learn their effect. Future assumptions may produce abrupt steps.\n" + "\n".join(msgs)
+                    )
+                # Measurement ambiguity: now provided by meta (list of ambiguous pairs)
+                amb_pairs = (meta or {}).get("measurement_ambiguity") or []
+                for pair in amb_pairs:
+                    st.warning(
+                        "Measurement caution: these features are measurement-linked and may have ambiguous attribution: "
+                        + ", ".join(pair)
                     )
             except Exception:
                 pass
