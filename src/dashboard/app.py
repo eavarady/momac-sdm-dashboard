@@ -643,25 +643,25 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                 key="mv_defect_rate",
             )
     if inc_shift_night:
-            with col_inputs1:
-                shift_night_share = st.slider(
-                    "Assumed Night Shift Share",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=float(round(night_share_default, 2)),
-                    step=0.01,
-                    key="mv_shift_night_share",
-                )
+        with col_inputs1:
+            shift_night_share = st.slider(
+                "Assumed Night Shift Share",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(round(night_share_default, 2)),
+                step=0.01,
+                key="mv_shift_night_share",
+            )
     if inc_inspection:
-            with col_inputs1:
-                inspection_cov = st.slider(
-                    "Assumed Inspection Coverage (fraction)",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=cov_default,
-                    step=0.01,
-                    key="mv_inspection_cov",
-                )
+        with col_inputs1:
+            inspection_cov = st.slider(
+                "Assumed Inspection Coverage (fraction)",
+                min_value=0.0,
+                max_value=1.0,
+                value=cov_default,
+                step=0.01,
+                key="mv_inspection_cov",
+            )
     with col_inputs2:
         if inc_energy:
             avg_energy_consumption = st.slider(
@@ -715,14 +715,18 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             scenario["included_variables"].append(fk)
             scenario["assumptions"][fk] = inspection_cov
         # Debug safeguard: if inclusion unexpectedly empty but a checkbox was selected
-        if not scenario["included_variables"] and any([
-            inc_defect_rate,
-            inc_shift_night,
-            inc_energy,
-            inc_wip_proxy,
-            inc_inspection,
-        ]):
-            st.warning("Debug: Scenario variable selection detected but inclusion list empty. Please rerun; if persists report a bug.")
+        if not scenario["included_variables"] and any(
+            [
+                inc_defect_rate,
+                inc_shift_night,
+                inc_energy,
+                inc_wip_proxy,
+                inc_inspection,
+            ]
+        ):
+            st.warning(
+                "Debug: Scenario variable selection detected but inclusion list empty. Please rerun; if persists report a bug."
+            )
         st.session_state["multivariate_scenario"] = scenario
         try:
             mv_path = "multivariate_forecasted_data.csv"
@@ -784,7 +788,8 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                             f"{feat}: std={std:.4f} n_unique={int(n_unique) if n_unique is not None else 'NA'}"
                         )
                     st.warning(
-                        "Low historical variation: the following scenario variable(s) had near-constant historical values and the model had little information to learn their effect. Future assumptions may produce abrupt steps.\n" + "\n".join(msgs)
+                        "Low historical variation: the following scenario variable(s) had near-constant historical values and the model had little information to learn their effect. Future assumptions may produce abrupt steps.\n"
+                        + "\n".join(msgs)
                     )
                 # Measurement ambiguity: now provided by meta (list of ambiguous pairs)
                 amb_pairs = (meta or {}).get("measurement_ambiguity") or []
@@ -959,7 +964,7 @@ fig_actual = chart.actual_gantt(
     view=view_actual,
 )
 if fig_actual is not None:
-    st.plotly_chart(fig_actual, width="stretch")
+    st.plotly_chart(fig_actual, use_container_width=True)
     _register_chart(
         f"gantt_actual_{view_actual}",
         f"Gantt — Actual ({'by run' if view_actual == 'by_run' else 'by step'})",
@@ -976,7 +981,7 @@ fig_planned = chart.planned_gantt(
     view=view_planned,
 )
 if fig_planned is not None:
-    st.plotly_chart(fig_planned, width="stretch")
+    st.plotly_chart(fig_planned, use_container_width=True)
     _register_chart(
         f"gantt_planned_{view_planned}",
         f"Gantt — Planned ({'by run' if view_planned == 'by_run' else 'by step'})",
