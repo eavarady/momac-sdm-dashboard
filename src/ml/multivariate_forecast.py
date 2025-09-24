@@ -45,6 +45,7 @@ SUPPORTED_FEATURES = {
     "defect_rate_pct",
     "shift_night_share",
     "avg_energy_consumption",
+    "wip_proxy",
 }
 
 MIN_NON_NULL = 3
@@ -240,6 +241,35 @@ def _compute_feature_series(
         else:
             feats["avg_energy_consumption"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
 
+    # wip_proxy: fraction of in-progress events during the period (in_progress / total)
+    if "wip_proxy" in included:
+        pl2 = tables.get("production_log", pd.DataFrame())
+        if not pl2.empty and {"status"}.issubset(pl2.columns):
+            ts_col_pl2 = _find_timestamp_column(pl2)
+            if ts_col_pl2:
+                tmp2 = pl2.copy()
+                tmp2[ts_col_pl2] = _safe_dt(tmp2[ts_col_pl2])
+                tmp2 = tmp2.dropna(subset=[ts_col_pl2])
+                if not tmp2.empty:
+                    tmp2["_status_norm"] = tmp2["status"].astype(str).str.lower()
+                    tmp2.set_index(ts_col_pl2, inplace=True)
+                    if getattr(tmp2.index, "tz", None) is not None:
+                        tmp2.index = tmp2.index.tz_convert("UTC").tz_localize(None)
+                    grp2 = tmp2.resample(freq).agg(
+                        total=("_status_norm", "count"),
+                        inprog=("_status_norm", lambda s: (s == "in_progress").sum()),
+                    )
+                    grp2["wip_proxy"] = grp2["inprog"] / grp2["total"].clip(lower=1)
+                    series = grp2["wip_proxy"].reindex(pd.DatetimeIndex(ds_index))
+                    series = series.fillna(0.0)
+                    feats["wip_proxy"] = series.astype(float)
+                else:
+                    feats["wip_proxy"] = pd.Series([0.0] * len(ds_index), index=ds_index)
+            else:
+                feats["wip_proxy"] = pd.Series([0.0] * len(ds_index), index=ds_index)
+        else:
+            feats["wip_proxy"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
+
     if not feats:
         return pd.DataFrame(index=ds_index)
     return pd.DataFrame(feats)
@@ -346,6 +376,42 @@ def run_multivariate_forecast(
 
     # Feature matrix for history (no scenario overrides)
     feat_hist = _compute_feature_series(tables, target["ds"], config.agg_freq, included)
+
+    # Historical variation diagnostics (non-fatal): detect near-constant features that could yield abrupt forecast steps
+    hist_var_stats: Dict[str, Dict[str, float]] = {}
+    hist_low_variation: List[str] = []
+    if not feat_hist.empty:
+        for col in feat_hist.columns:
+            series = feat_hist[col].dropna().astype(float)
+            if series.empty:
+                continue
+            n_unique = int(series.nunique())
+            std = float(series.std(ddof=0)) if len(series) > 1 else 0.0
+            vmin = float(series.min())
+            vmax = float(series.max())
+            value_range = vmax - vmin
+            is_fraction_scale = series.between(0.0, 1.0).all()
+            is_percent_feature = col == "defect_rate_pct"
+            # Thresholds (kept modest to avoid false positives):
+            #  - Fractions: std < 0.01 OR n_unique <= 2
+            #  - Percent feature: std < 0.5 OR n_unique <= 2
+            trigger = False
+            if is_fraction_scale:
+                if std < 0.01 or n_unique <= 2:
+                    trigger = True
+            elif is_percent_feature:
+                if std < 0.5 or n_unique <= 2:
+                    trigger = True
+            # Record stats
+            hist_var_stats[col] = {
+                "std": std,
+                "n_unique": float(n_unique),
+                "min": vmin,
+                "max": vmax,
+                "range": value_range,
+            }
+            if trigger:
+                hist_low_variation.append(col)
 
     # If user selected features, enforce adequacy; else allow baseline later.
     if included:
@@ -455,6 +521,17 @@ def run_multivariate_forecast(
         }
     except Exception:
         influence_meta = None
+
+    # Attach historical variation diagnostics to meta (initialize meta if absent)
+    if influence_meta is None:
+        influence_meta = {}
+    influence_meta["historical_variation"] = hist_var_stats
+    influence_meta["historical_low_variation"] = hist_low_variation
+    influence_meta["historical_low_variation_thresholds"] = {
+        "fraction_std": 0.01,
+        "percent_std": 0.5,
+        "min_unique_flag": 2,
+    }
 
     # Residual stddev for intervals
     if len(y_train) > 2:

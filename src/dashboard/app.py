@@ -671,6 +671,7 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
         "Defect rate %": "defect_rate_pct",
         "Night shift share": "shift_night_share",
         "Avg energy consumption": "avg_energy_consumption",
+    "WIP proxy (fraction)": "wip_proxy",
     }
 
     col_vars1, col_vars2 = st.columns(2)
@@ -693,6 +694,12 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             value=False,
             key="mv_inc_energy",
             help="Feature key: avg_energy_consumption (mean energy metric)",
+        )
+        inc_wip_proxy = st.checkbox(
+            "WIP proxy (fraction)",
+            value=False,
+            key="mv_inc_wip_proxy",
+            help="Feature key: wip_proxy (in-progress / total events per period)",
         )
 
     # Inputs for selected variables
@@ -758,6 +765,23 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                 step=0.1,
                 key="mv_avg_energy_consumption",
             )
+        if inc_wip_proxy:
+            # derive default as historical mean fraction
+            pl_hist = _tables.get("production_log", pd.DataFrame())
+            if not pl_hist.empty and {"status"}.issubset(pl_hist.columns):
+                status_norm = pl_hist["status"].astype(str).str.lower()
+                # crude fraction across entire history (not periodized) just for a starting point
+                wip_default = float(round((status_norm == "in_progress").sum() / max(1, len(status_norm)), 2))
+            else:
+                wip_default = 0.0
+            wip_proxy_val = st.slider(
+                "Assumed WIP Proxy (fraction)",
+                min_value=0.0,
+                max_value=1.0,
+                value=wip_default,
+                step=0.01,
+                key="mv_wip_proxy",
+            )
 
     st.markdown("---")
     run_mv = st.button("Generate Multivariate Scenario Forecast")
@@ -783,6 +807,10 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             fk = FEATURE_LABELS["Avg energy consumption"]
             scenario["included_variables"].append(fk)
             scenario["assumptions"][fk] = avg_energy_consumption
+        if 'inc_wip_proxy' in locals() and inc_wip_proxy:
+            fk = FEATURE_LABELS["WIP proxy (fraction)"]
+            scenario["included_variables"].append(fk)
+            scenario["assumptions"][fk] = wip_proxy_val
         st.session_state["multivariate_scenario"] = scenario
         try:
             mv_path = "multivariate_forecasted_data.csv"
@@ -830,6 +858,21 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                     st.warning(
                         "Low influence: the following scenario variable(s) had near-zero standardized coefficients and may have negligible effect: "
                         + ", ".join(low)
+                    )
+                # Historical low variation diagnostics (distinct from model influence)
+                hist_low = (meta or {}).get("historical_low_variation") or []
+                hist_stats = (meta or {}).get("historical_variation") or {}
+                if hist_low:
+                    msgs = []
+                    for feat in hist_low:
+                        s = hist_stats.get(feat, {})
+                        std = s.get("std")
+                        n_unique = s.get("n_unique")
+                        msgs.append(
+                            f"{feat}: std={std:.4f} n_unique={int(n_unique) if n_unique is not None else 'NA'}"
+                        )
+                    st.warning(
+                        "Low historical variation: the following scenario variable(s) had near-constant historical values and the model had little information to learn their effect. Future assumptions may produce abrupt steps.\n" + "\n".join(msgs)
                     )
             except Exception:
                 pass
