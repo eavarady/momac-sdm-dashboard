@@ -137,11 +137,16 @@ def generate_mock_data(
             else:
                 requires_machine = None
 
-            assigned_machine = (
-                random.choice(machines["machine_id"])
-                if (requires_machine or requires_machine is None)
-                else ""
-            )
+            # Distribute assigned_machine across machines in round-robin to
+            # avoid concentrating many steps on a single machine (e.g., MX-101).
+            if (requires_machine or requires_machine is None) and len(machines) > 0:
+                # use a deterministic index based on product and step to keep
+                # assignments stable across runs when seed is fixed
+                prod_index = int("".join([c for c in prod_id if c.isdigit()]) or 0)
+                machine_idx = (prod_index + idx) % len(machines["machine_id"])
+                assigned_machine = machines["machine_id"][machine_idx]
+            else:
+                assigned_machine = ""
 
             row = {
                 "product_id": prod_id,
@@ -217,6 +222,8 @@ def generate_mock_data(
                 in_recent_period = current_day >= recent_threshold
                 inject_inprogress = in_recent_period or (random.random() < 0.1)
                 made_inprogress = False
+                # ensure steps for this run are sequenced: keep previous step end
+                prev_end = None
                 for s in steps_for_pid:
                     if current_day.date() > end_date.date():
                         break
@@ -237,12 +244,33 @@ def generate_mock_data(
                         status = "in_progress"
                         made_inprogress = True
 
+                    # Enforce sequencing: if a previous step end exists, ensure this
+                    # step starts after prev_end + small setup buffer. This prevents
+                    # out-of-order step times within the same run.
+                    if prev_end is not None:
+                        # small setup buffer between steps (2-10 minutes)
+                        setup_buffer = timedelta(seconds=random.randint(120, 600))
+                        min_start = prev_end + setup_buffer
+                        if start_dt < min_start:
+                            # move start forward to respect sequencing
+                            start_dt = min_start
+                            # if the adjusted start is beyond the workday end,
+                            # clamp it so end remains inside the day window
+                            if start_dt > day_end:
+                                # push start to latest possible slot keeping at least
+                                # a short duration (min 1 minute)
+                                adj_seconds = min(dur_seconds, 60)
+                                start_dt = day_end - timedelta(seconds=adj_seconds)
+                            start_iso = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
                     if status == "complete":
                         end_dt = start_dt + timedelta(seconds=dur_seconds)
                         if end_dt > day_end:
                             end_dt = day_end
                         end_iso = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
                         ts_iso = end_iso
+                        # update prev_end for sequencing the next step
+                        prev_end = end_dt
                     else:
                         end_iso = ""
                         ts_iso = start_iso
@@ -371,15 +399,22 @@ def generate_mock_data(
                 in machines[machines.line_id == r.get("line_id")]["machine_id"].tolist()
             ]
 
-            # helper to compute load
+            # helper to compute load in seconds (sum of scheduled durations)
             def load_of(m: str) -> int:
-                return len(machine_schedule.get(m, []))
+                total = 0
+                for ex_s, ex_e in machine_schedule.get(m, []):
+                    try:
+                        total += int((ex_e - ex_s).total_seconds())
+                    except Exception:
+                        total += 0
+                return total
 
-            # build candidate list: preferred (if valid), same-line least-busy, then other least-busy
+            # build candidate list: same-line least-busy, then other least-busy.
+            # Do not force the assigned_machine to the front to avoid
+            # concentrating load on a single machine; let load_of ordering
+            # naturally balance assignments. The preferred machine will
+            # still appear in the list if it's a valid machine.
             candidate_machines = []
-            if preferred and preferred in machines_list:
-                candidate_machines.append(preferred)
-
             # add same-line machines sorted by current load
             for m in sorted(same_line_machines, key=load_of):
                 if m not in candidate_machines:
@@ -391,16 +426,65 @@ def generate_mock_data(
                     candidate_machines.append(m)
 
             chosen: str | None = None
+            # larger buffer to represent machine setup/changeover (30 minutes)
+            schedule_buffer = timedelta(minutes=30)
+
+            # helper: given a machine schedule (list of (s,e)), find earliest start >= candidate
+            # such that [start, start+duration] does not intersect buffered existing intervals.
+            def find_earliest_gap(sched_list, candidate_start, duration_td):
+                # build list of buffered intervals sorted by start
+                buf_intervals = []
+                for ex_s, ex_e in sorted(sched_list, key=lambda t: t[0]):
+                    buf_intervals.append(
+                        (ex_s - schedule_buffer, ex_e + schedule_buffer)
+                    )
+
+                start_try = candidate_start
+                # iterate through buffered intervals and push start_try forward if it intersects
+                for b_s, b_e in buf_intervals:
+                    # if current try ends before this buffered interval starts, it's free
+                    if start_try + duration_td <= b_s:
+                        return start_try
+                    # otherwise move start_try to the end of this buffered interval
+                    if start_try >= b_s and start_try < b_e:
+                        start_try = b_e
+                # no more intervals to block; return start_try
+                return start_try
+
+            # compute duration timedelta
+            duration_td = end - start
+
+            # Compute earliest feasible start per candidate machine and pick the machine
+            # that can run the job the soonest. Tie-break by projected load.
+            earliest_options: list[tuple[datetime, int, str]] = []
             for m in candidate_machines:
                 sched = machine_schedule.setdefault(m, [])
-                # check for overlap: intervals intersect -> skip
-                has_overlap = any(
-                    not (end <= ex_s or start >= ex_e) for ex_s, ex_e in sched
-                )
-                if not has_overlap:
-                    chosen = m
-                    sched.append((start, end))
-                    break
+                est = find_earliest_gap(sched, start, duration_td)
+                projected_load = load_of(m) + int(duration_td.total_seconds())
+                earliest_options.append((est, projected_load, m))
+
+            if earliest_options:
+                # sort by earliest start then by projected load
+                earliest_options.sort(key=lambda t: (t[0], t[1]))
+                new_start, _, pick_machine = earliest_options[0]
+                # schedule on chosen machine at the earliest available slot
+                start = new_start
+                end = start + duration_td
+                machine_schedule.setdefault(pick_machine, []).append((start, end))
+                chosen = pick_machine
+                # Update the production_log row times to reflect the scheduled slot.
+                # Keep in-progress rows with empty end_time but update start_time/timestamp.
+                st_iso = start.strftime("%Y-%m-%dT%H:%M:%SZ")
+                end_iso = end.strftime("%Y-%m-%dT%H:%M:%SZ")
+                status = r.get("status")
+                if status == "in_progress":
+                    r["start_time"] = st_iso
+                    r["end_time"] = ""
+                    r["timestamp"] = st_iso
+                else:
+                    r["start_time"] = st_iso
+                    r["end_time"] = end_iso
+                    r["timestamp"] = end_iso
 
             r["actual_machine_id"] = chosen if chosen is not None else ""
 
