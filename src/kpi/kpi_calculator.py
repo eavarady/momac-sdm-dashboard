@@ -457,12 +457,12 @@ def compute_labor_efficiency(
         pd.to_datetime(df["end_time"]) if "end_time" in df.columns else pd.NaT
     )
     # duration in hours
+    # If end_time is missing, use current UTC time (ensure tz-aware)
+    now = pd.Timestamp.utcnow()
+    if now.tzinfo is None:
+        now = now.tz_localize("UTC")
     df["duration_hours"] = (
-        (
-            df["end_time"].fillna(pd.Timestamp.utcnow().tz_localize("UTC"))
-            - df["start_time"]
-        ).dt.total_seconds()
-        / 3600.0
+        (df["end_time"].fillna(now) - df["start_time"]).dt.total_seconds() / 3600.0
     ).clip(lower=0)
 
     steps = process_steps[["product_id", "step_id", "estimated_time"]].copy()
