@@ -125,8 +125,6 @@ def _render_export_pdf_ui(container) -> None:
     )
 
 
-
-
 with st.sidebar:
     st.header("Data Source")
     source = st.radio("Select source", ["CSV", "Google Sheets", "Excel"], index=0)
@@ -217,7 +215,7 @@ except Exception as e:
 
 # KPIs
 kpis = compute_all_kpis(_tables)
-col1, col2, col3, col4, col5, col6 = st.columns(6)
+col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns(9)
 
 # Show throughput per hour with one decimal
 
@@ -230,6 +228,12 @@ col4.metric("WIP (Qty)", f"{kpis.get('wip', 0)}")
 # schedule_efficiency displays as an index (e.g., 0.83x, 1.12x)
 col5.metric("Schedule Efficiency", f"{(kpis.get('schedule_efficiency') or 0.0):.2f}x")
 col6.metric("On-Time Rate", f"{(kpis.get('on_time_rate') or 0.0)*100:.1f}%")
+col7.metric("Avg. Cycle Time (hrs)", f"{(kpis.get('avg_cycle_time') or 0.0):.2f}")
+col8.metric("Median Cycle Time (hrs)", f"{(kpis.get('median_cycle_time') or 0.0):.2f}")
+# Show manpower utilization (overall). If you meant labor efficiency, use 'labor_efficiency_overall'.
+col9.metric(
+    "Labor Utilization", f"{(kpis.get('manpower_utilization_overall') or 0.0)*100:.1f}%"
+)
 
 # Silently build a PDF-friendly KPI summary figure and register for export
 try:
@@ -328,7 +332,9 @@ with st.expander("Time Series Forecasting", expanded=False):
                 # Plot directly from returned df and provide CSV download
                 if fc is not None and not fc.empty:
                     # Derive effective horizon actually achieved (# future rows)
-                    future_rows = fc[fc["y"].isna()].shape[0] if "y" in fc.columns else 0
+                    future_rows = (
+                        fc[fc["y"].isna()].shape[0] if "y" in fc.columns else 0
+                    )
                     st.success(
                         f"Forecast complete. Effective horizon: {future_rows} periods."
                     )
@@ -353,7 +359,9 @@ with st.expander("Time Series Forecasting", expanded=False):
                     )
                     st.download_button(
                         label="Download .xlsx",
-                        data=to_excel_bytes(fc, index=False, sheet_name="Forecast (TS)"),
+                        data=to_excel_bytes(
+                            fc, index=False, sheet_name="Forecast (TS)"
+                        ),
                         file_name="time_series_forecasted_data.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key="dl_ts_fc_xlsx",
@@ -461,7 +469,9 @@ with st.expander("Regression-based forecasting", expanded=False):
                     )
                     st.download_button(
                         label="Download .xlsx",
-                        data=to_excel_bytes(fc_lr, index=False, sheet_name="Forecast (LR)"),
+                        data=to_excel_bytes(
+                            fc_lr, index=False, sheet_name="Forecast (LR)"
+                        ),
                         file_name="linear_forecasted_data.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key="dl_lr_fc_xlsx",
@@ -705,7 +715,9 @@ else:
         )
         st.download_button(
             label="Download .xlsx",
-            data=to_excel_bytes(top3, rename=bt_rename, index=False, sheet_name="Top 3 Bottlenecks"),
+            data=to_excel_bytes(
+                top3, rename=bt_rename, index=False, sheet_name="Top 3 Bottlenecks"
+            ),
             file_name="top_bottlenecks.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="top3_bottlenecks_xlsx",
@@ -792,7 +804,9 @@ if not products.empty and {"product_id", "name"}.issubset(products.columns):
     product_names = products[["product_id", "name"]].copy()
 
 step_names = None
-if not process_steps_df.empty and {"step_id", "step_name"}.issubset(process_steps_df.columns):
+if not process_steps_df.empty and {"step_id", "step_name"}.issubset(
+    process_steps_df.columns
+):
     step_names = process_steps_df[["step_id", "step_name"]].drop_duplicates().copy()
 
 # View toggle controls
@@ -1218,7 +1232,11 @@ if not spr.empty:
     )
     st.download_button(
         label="Download .xlsx",
-        data=to_excel_bytes(disp_run[cols].rename(columns=rename_map), index=False, sheet_name="Per-Run Progress"),
+        data=to_excel_bytes(
+            disp_run[cols].rename(columns=rename_map),
+            index=False,
+            sheet_name="Per-Run Progress",
+        ),
         file_name="per_run_progress.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="per_run_progress_xlsx",
