@@ -228,12 +228,16 @@ col4.metric("WIP (Qty)", f"{kpis.get('wip', 0)}")
 # schedule_efficiency displays as an index (e.g., 0.83x, 1.12x)
 col5.metric("Schedule Efficiency", f"{(kpis.get('schedule_efficiency') or 0.0):.2f}x")
 col6.metric("On-Time Rate", f"{(kpis.get('on_time_rate') or 0.0)*100:.1f}%")
-col7.metric("Avg. Cycle Time (hrs)", f"{(kpis.get('avg_cycle_time') or 0.0):.2f}")
-col8.metric("Median Cycle Time (hrs)", f"{(kpis.get('median_cycle_time') or 0.0):.2f}")
-# Show manpower utilization (overall). If you meant labor efficiency, use 'labor_efficiency_overall'.
-col9.metric(
-    "Labor Utilization", f"{(kpis.get('manpower_utilization_overall') or 0.0)*100:.1f}%"
+# Avg cycle time: use backward-compatible key plus explicit mean key
+col7.metric(
+    "Avg. Cycle Time (hrs)",
+    f"{(kpis.get('avg_cycle_time') or kpis.get('avg_cycle_time_mean') or 0.0):.2f}",
 )
+# Median cycle time (use the median key added in KPI calculator)
+col8.metric(
+    "Median Cycle Time (hrs)", f"{(kpis.get('avg_cycle_time_median') or 0.0):.2f}"
+)
+# Removed overall labor metric from the top row (moved to dedicated manpower row below)
 
 # Silently build a PDF-friendly KPI summary figure and register for export
 try:
@@ -243,6 +247,41 @@ try:
     _register_chart("kpi_summary", "KPI Summary", kpi_fig)
 except Exception:
     pass
+
+# --- Manpower / labor KPIs on their own row ---
+manpower_overall = kpis.get("manpower_utilization_overall", 0.0)
+labor_eff_overall = kpis.get("labor_efficiency_overall", 0.0)
+
+# Average operator-level utilization (if per-operator rollup available)
+_man_by_op = kpis.get("manpower_by_operator", {}) or {}
+if isinstance(_man_by_op, dict) and _man_by_op:
+    try:
+        avg_util_ops = sum(
+            float(v.get("utilization", 0.0)) for v in _man_by_op.values()
+        ) / max(1, len(_man_by_op))
+    except Exception:
+        avg_util_ops = 0.0
+else:
+    avg_util_ops = 0.0
+
+# Average operator-level efficiency (if per-operator labor efficiency available)
+_lab_by_op = kpis.get("labor_eff_by_operator", {}) or {}
+if isinstance(_lab_by_op, dict) and _lab_by_op:
+    try:
+        avg_eff_ops = sum(
+            float(v.get("efficiency", 0.0)) for v in _lab_by_op.values()
+        ) / max(1, len(_lab_by_op))
+    except Exception:
+        avg_eff_ops = 0.0
+else:
+    avg_eff_ops = 0.0
+
+# Render manpower KPIs in a dedicated row of columns (below the primary KPI row)
+mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+mcol1.metric("Labor Utilization (overall)", f"{manpower_overall*100:.1f}%")
+mcol2.metric("Labor Efficiency (overall)", f"{labor_eff_overall*100:.1f}%")
+mcol3.metric("Avg Utilization (operators)", f"{avg_util_ops*100:.1f}%")
+mcol4.metric("Avg Efficiency (operators)", f"{avg_eff_ops*100:.1f}%")
 
 ### BOTTLENECK DETECTION AND FORECASTING ###
 
