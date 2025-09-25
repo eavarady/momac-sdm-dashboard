@@ -15,6 +15,7 @@ TABLES_ORDER = [
     "production_log",
     "machine_metrics",
     "quality_checks",
+    "labor_activities",
 ]
 
 

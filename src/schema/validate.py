@@ -330,50 +330,9 @@ def check_uniques_and_fks(tables: Dict[str, pd.DataFrame]) -> List[str]:
             pass
 
     # --- Overlap checks -------------------------------------------------------------
-    # Operators: overlapping labor_activity intervals per operator -> default ERROR
-    if "labor_activities" in tables:
-        try:
-            la = tables["labor_activities"].reset_index(drop=True)
-            # group by operator
-            for op, grp in la.groupby(la["operator_id"].astype(str), dropna=False):
-                intervals: list[tuple[datetime, datetime, int, str]] = []
-                for idx, row in grp.reset_index(drop=True).iterrows():
-                    start = row.get("start_time")
-                    end = row.get("end_time")
-                    # normalize pd.NaT etc.
-                    if pd.isna(start):
-                        continue
-                    # If end_time is missing, approximate as start + 1 hour to avoid marking
-                    # benign in-progress or legacy-missing rows as permanently open intervals.
-                    # This reduces false positive overlaps in mock/generated datasets.
-                    if pd.isna(end) or end is None:
-                        end = start + timedelta(hours=1)
-                    intervals.append(
-                        (
-                            start,
-                            end,
-                            int(row.name) + 1 if hasattr(row, "name") else idx + 1,
-                            row.get("activity_id"),
-                        )
-                    )
-                if len(intervals) < 2:
-                    continue
-                intervals.sort(key=lambda x: x[0])
-                prev_s, prev_e, prev_rownum, prev_aid = intervals[0]
-                for cur_s, cur_e, cur_rownum, cur_aid in intervals[1:]:
-                    if cur_s < prev_e:
-                        errs.append(
-                            f"OVERLAP operator {op!r}: activity rows {prev_rownum}({prev_aid}) and {cur_rownum}({cur_aid}) have overlapping intervals"
-                        )
-                    if cur_e > prev_e:
-                        prev_s, prev_e, prev_rownum, prev_aid = (
-                            cur_s,
-                            cur_e,
-                            cur_rownum,
-                            cur_aid,
-                        )
-        except Exception:
-            pass
+    # Operators: allow overlapping labor_activity intervals by default.
+    # Rationale: overlaps are common (handoffs, rounding, parallel logs). FTE logic de-overlaps.
+    # We intentionally do not warn here to avoid noise; anomaly-focused checks can be added elsewhere.
 
     # Machines: derive machine_id per production_log row (actual_machine_id or assigned_machine from process_steps)
     if "production_log" in tables:

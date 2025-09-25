@@ -60,6 +60,7 @@ def read_csv_tables() -> Dict[str, pd.DataFrame]:
         "production_log",
         "machine_metrics",
         "quality_checks",
+        "labor_activities",
         # Canonical run metadata
         "runs",
     ]:
@@ -109,6 +110,8 @@ def read_csv_tables() -> Dict[str, pd.DataFrame]:
                     )
                 elif name == "runs":
                     df = validate_dataframe(raw, "runs")
+                elif name == "labor_activities":
+                    df = validate_dataframe(raw, "labor_activities")
 
                 rows_valid = len(df)
                 _LAST_LOAD_STATS[name] = {
