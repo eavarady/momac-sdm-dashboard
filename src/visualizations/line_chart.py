@@ -27,8 +27,8 @@ import plotly.graph_objects as go
 
 DEFAULT_COLORS = {
     "actual": "#1f77b4",
-    "forecast": "#ff7f0e",
-    "interval": "rgba(255,127,14,0.15)",
+    "forecast": "#FC0D21",
+    "interval": "rgba(253,152,155,0.15)",
 }
 
 
