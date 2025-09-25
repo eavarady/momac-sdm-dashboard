@@ -419,7 +419,7 @@ with st.expander("Regression-based forecasting", expanded=False):
             "Linear regression looks at past data and finds a straight line that best fits the trend. "
             "Imagine plotting dots on a chart and drawing the line that best passes through them. "
             "That line is then extended into the future to produce a forecast. "
-            "It's a simple approach that's most useful when the data shows a clear upward or downward trend."
+            "It's a simple approach that's most useful when the data shows a clear upward or downward linear trend."
         ),
     )
     df_lr = _tables.get("production_log", pd.DataFrame())
@@ -595,6 +595,8 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
     energy_default = _mv_defaults.get("avg_energy_consumption", 0.0)
     wip_default = _mv_defaults.get("wip_proxy", 0.0)
     cov_default = _mv_defaults.get("inspection_intensity", 0.0)
+    headcount_default = int(round(_mv_defaults.get("operator_headcount", 0.0) or 0.0))
+    eff_fte_default = float(_mv_defaults.get("effective_operator_fte", 0.0) or 0.0)
 
     col_vars1, col_vars2 = st.columns(2)
     with col_vars1:
@@ -616,6 +618,13 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             key="mv_inc_inspection_cov",
             help="Feature key: inspection_intensity (inspected units / produced units)",
         )
+        inc_headcount = st.checkbox(
+            "Operator headcount",
+            value=False,
+            key="mv_inc_headcount",
+            help="Feature key: operator_headcount (distinct operators active per period). " \
+            "Simple presence/headcount proxy — does not reflect hours worked. " \
+        )
     with col_vars2:
         inc_energy = st.checkbox(
             "Avg energy consumption",
@@ -628,6 +637,13 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             value=False,
             key="mv_inc_wip_proxy",
             help="Feature key: wip_proxy (in-progress / total events per period)",
+        )
+        inc_eff_fte = st.checkbox(
+            "Effective operator FTE",
+            value=False,
+            key="mv_inc_eff_fte",
+            help="Feature key: effective_operator_fte (sum of operator work hours per period / 8h). " \
+            "A capacity (FTE) measure that reflects hours worked.",
         )
 
     # Inputs for selected variables
@@ -662,6 +678,18 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                 step=0.01,
                 key="mv_inspection_cov",
             )
+    if inc_headcount:
+        with col_inputs1:
+            # Dynamic max: at least 10, else ~2x default
+            max_headcount = int(max(10, (headcount_default or 0) * 2))
+            operator_headcount_val = st.slider(
+                "Assumed Operator Headcount",
+                min_value=0,
+                max_value=max_headcount,
+                value=int(min(headcount_default, max_headcount)),
+                step=1,
+                key="mv_operator_headcount",
+            )
     with col_inputs2:
         if inc_energy:
             avg_energy_consumption = st.slider(
@@ -680,6 +708,18 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                 value=wip_default,
                 step=0.01,
                 key="mv_wip_proxy",
+            )
+        if inc_eff_fte:
+            # Dynamic max: relate to headcount if available, else fallback to 10
+            dynamic_cap = (headcount_default or 0) * 2
+            max_eff_fte = float(max(10.0, dynamic_cap if dynamic_cap > 0 else 10.0))
+            eff_fte_val = st.slider(
+                "Assumed Effective Operator FTE",
+                min_value=0.0,
+                max_value=max_eff_fte,
+                value=float(min(eff_fte_default or 0.0, max_eff_fte)),
+                step=0.1,
+                key="mv_effective_operator_fte",
             )
 
     st.markdown("---")
@@ -714,6 +754,14 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
             fk = FEATURE_LABELS["Inspection coverage"]
             scenario["included_variables"].append(fk)
             scenario["assumptions"][fk] = inspection_cov
+        if inc_headcount:
+            fk = FEATURE_LABELS["Operator headcount"]
+            scenario["included_variables"].append(fk)
+            scenario["assumptions"][fk] = int(operator_headcount_val)
+        if inc_eff_fte:
+            fk = FEATURE_LABELS["Effective operator FTE"]
+            scenario["included_variables"].append(fk)
+            scenario["assumptions"][fk] = float(eff_fte_val)
         # Debug safeguard: if inclusion unexpectedly empty but a checkbox was selected
         if not scenario["included_variables"] and any(
             [
@@ -722,6 +770,8 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                 inc_energy,
                 inc_wip_proxy,
                 inc_inspection,
+                inc_headcount,
+                inc_eff_fte,
             ]
         ):
             st.warning(
@@ -796,6 +846,13 @@ with st.expander("Multivariate Regression (Scenario Forecast)", expanded=False):
                 for pair in amb_pairs:
                     st.warning(
                         "Measurement caution: these features are measurement-linked and may have ambiguous attribution: "
+                        + ", ".join(pair)
+                    )
+                # Collinearity caution between related labor variables
+                col_pairs = (meta or {}).get("collinearity_caution") or []
+                for pair in col_pairs:
+                    st.warning(
+                        "Collinearity caution: these variables can convey overlapping capacity and may be highly correlated. Consider using one or interpret coefficients with care: "
                         + ", ".join(pair)
                     )
             except Exception:

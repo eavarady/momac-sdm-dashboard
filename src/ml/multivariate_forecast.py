@@ -47,6 +47,8 @@ SUPPORTED_FEATURES = {
     "avg_energy_consumption",
     "wip_proxy",
     "inspection_intensity",
+    "operator_headcount",
+    "effective_operator_fte",
 }
 
 # Friendly label -> internal feature key mapping (single source of truth)
@@ -56,6 +58,8 @@ FEATURE_LABELS = {
     "Avg energy consumption": "avg_energy_consumption",
     "WIP proxy (fraction)": "wip_proxy",
     "Inspection coverage": "inspection_intensity",
+    "Operator headcount": "operator_headcount",
+    "Effective operator FTE": "effective_operator_fte",
 }
 
 MIN_NON_NULL = 3
@@ -339,6 +343,110 @@ def _compute_feature_series(
         else:
             feats["inspection_intensity"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
 
+    # operator_headcount: number of distinct operator_id active in the period (prefer labor_activities)
+    if "operator_headcount" in included:
+        la = tables.get("labor_activities", pd.DataFrame())
+        if not la.empty and {"operator_id", "start_time"}.issubset(la.columns):
+            tmp = la[["start_time", "operator_id"]].copy()
+            tmp["start_time"] = _safe_dt(tmp["start_time"])  # to UTC
+            tmp = tmp.dropna(subset=["start_time", "operator_id"]).drop_duplicates()
+            if not tmp.empty:
+                tmp = tmp.set_index("start_time")
+                if getattr(tmp.index, "tz", None) is not None:
+                    tmp.index = tmp.index.tz_convert("UTC").tz_localize(None)
+                head = tmp.groupby(pd.Grouper(freq=freq))["operator_id"].nunique()
+                series = head.reindex(pd.DatetimeIndex(ds_index)).fillna(0.0)
+                feats["operator_headcount"] = series.astype(float)
+            else:
+                feats["operator_headcount"] = pd.Series([0.0] * len(ds_index), index=ds_index)
+        else:
+            feats["operator_headcount"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
+
+    # effective_operator_fte: sum of UNIQUE operator work seconds per period / (8h) using labor_activities
+    if "effective_operator_fte" in included:
+        la2 = tables.get("labor_activities", pd.DataFrame())
+        if not la2.empty and {"start_time", "end_time", "operator_id"}.issubset(la2.columns):
+            tmpf = la2[["start_time", "end_time", "operator_id"]].copy()
+            tmpf["start_time"] = _safe_dt(tmpf["start_time"])  # to UTC
+            tmpf["end_time"] = _safe_dt(tmpf["end_time"])  # to UTC
+            # tolerate missing end_time by approximating 1 hour duration (benign default)
+            mask_missing_end = tmpf["end_time"].isna() & tmpf["start_time"].notna()
+            tmpf.loc[mask_missing_end, "end_time"] = tmpf.loc[mask_missing_end, "start_time"] + pd.Timedelta(hours=1)
+            tmpf = tmpf.dropna(subset=["start_time", "end_time", "operator_id"]).copy()
+            if not tmpf.empty:
+                # Normalize to tz-naive like target ds_index
+                for col in ("start_time", "end_time"):
+                    if getattr(tmpf[col].dtype, "tz", None) is not None:
+                        tmpf[col] = tmpf[col].dt.tz_convert("UTC").dt.tz_localize(None)
+
+                # Merge overlapping intervals per operator to avoid self double-counting
+                def merge_intervals(df_op: pd.DataFrame) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+                    ivs = (
+                        df_op[["start_time", "end_time"]]
+                        .sort_values("start_time")
+                        .itertuples(index=False, name=None)
+                    )
+                    merged: list[tuple[pd.Timestamp, pd.Timestamp]] = []
+                    for s, e in ivs:
+                        if pd.isna(s) or pd.isna(e):
+                            continue
+                        if e < s:
+                            # skip negative intervals
+                            continue
+                        if not merged:
+                            merged.append((s, e))
+                        else:
+                            ps, pe = merged[-1]
+                            if s <= pe:
+                                # overlap/adjacent -> extend
+                                merged[-1] = (ps, max(pe, e))
+                            else:
+                                merged.append((s, e))
+                    return merged
+
+                # Helper to accumulate seconds into period buckets (supports non-fixed freq like W/M/Q)
+                def period_start(ts: pd.Timestamp) -> pd.Timestamp:
+                    # Use Period to support anchored/non-fixed frequencies (W/M/Q)
+                    p = pd.Period(pd.Timestamp(ts), freq=freq)
+                    return p.start_time
+
+                def period_end(ts: pd.Timestamp) -> pd.Timestamp:
+                    # Exclusive end: start of the next period
+                    p = pd.Period(pd.Timestamp(ts), freq=freq)
+                    return (p + 1).start_time
+
+                seconds_per_period: dict[pd.Timestamp, float] = {}
+
+                for _, grp in tmpf.groupby(tmpf["operator_id"].astype(str), dropna=False):
+                    merged_ivs = merge_intervals(grp)
+                    for s, e in merged_ivs:
+                        if pd.isna(s) or pd.isna(e) or e <= s:
+                            continue
+                        # Iterate across periods using actual boundaries
+                        cur = s
+                        while cur < e:
+                            ps = period_start(cur)
+                            pe = period_end(cur)
+                            # Clip to the interval [s,e)
+                            seg_start = max(cur, s)
+                            seg_end = min(pe, e)
+                            if seg_end > seg_start:
+                                seconds = (seg_end - seg_start).total_seconds()
+                                seconds_per_period[ps] = seconds_per_period.get(ps, 0.0) + seconds
+                            # Advance to next period start
+                            cur = pe
+
+                idx = pd.DatetimeIndex(ds_index)
+                sec_series = pd.Series(seconds_per_period, dtype=float)
+                sec_series.index = pd.to_datetime(sec_series.index)
+                sec_series = sec_series.reindex(idx).fillna(0.0)
+                standard_seconds_per_fte = 8 * 3600
+                feats["effective_operator_fte"] = (sec_series / standard_seconds_per_fte).astype(float)
+            else:
+                feats["effective_operator_fte"] = pd.Series([0.0] * len(ds_index), index=ds_index)
+        else:
+            feats["effective_operator_fte"] = pd.Series([np.nan] * len(ds_index), index=ds_index)
+
     if not feats:
         return pd.DataFrame(index=ds_index)
     return pd.DataFrame(feats)
@@ -425,6 +533,28 @@ def compute_feature_defaults(tables: Dict[str, pd.DataFrame]) -> Dict[str, float
             defaults["inspection_intensity"] = 0.0
     else:
         defaults["inspection_intensity"] = 0.0
+
+    # Operator headcount default: distinct operators across all activities
+    la_def = tables.get("labor_activities", pd.DataFrame())
+    if not la_def.empty and "operator_id" in la_def.columns:
+        defaults["operator_headcount"] = float(la_def["operator_id"].dropna().nunique())
+    else:
+        defaults["operator_headcount"] = 0.0
+
+    # Effective operator FTE default: approximate using total activity durations / 8h
+    if not la_def.empty and {"start_time", "end_time", "operator_id"}.issubset(la_def.columns):
+        tmp = la_def[["start_time", "end_time", "operator_id"]].copy()
+        tmp["start_time"] = _safe_dt(tmp["start_time"])  
+        tmp["end_time"] = _safe_dt(tmp["end_time"])  
+        tmp = tmp.dropna(subset=["start_time", "end_time", "operator_id"]) 
+        if not tmp.empty:
+            total_seconds = (tmp["end_time"] - tmp["start_time"]).dt.total_seconds().clip(lower=0).sum()
+            fte_total = total_seconds / (8 * 3600)
+            defaults["effective_operator_fte"] = float(round(fte_total, 2))
+        else:
+            defaults["effective_operator_fte"] = 0.0
+    else:
+        defaults["effective_operator_fte"] = 0.0
 
     return defaults
 
@@ -573,28 +703,45 @@ def run_multivariate_forecast(
                 continue
             n_unique = int(series.nunique())
             std = float(series.std(ddof=0)) if len(series) > 1 else 0.0
+            mean = float(series.mean()) if len(series) > 0 else 0.0
             vmin = float(series.min())
             vmax = float(series.max())
             value_range = vmax - vmin
             is_fraction_scale = series.between(0.0, 1.0).all()
             is_percent_feature = col == "defect_rate_pct"
-            # Thresholds (kept modest to avoid false positives):
-            #  - Fractions: std < 0.01 OR n_unique <= 2
-            #  - Percent feature: std < 0.5 OR n_unique <= 2
+            # Scale-agnostic metrics
+            eps = 1e-9
+            cv = float(std / (abs(mean) + eps)) if len(series) > 1 else 0.0
+            rel_range = float(value_range / (abs(mean) + eps)) if len(series) > 0 else 0.0
+            # Thresholds (kept modest to avoid false positives). We warn when:
+            #  - very low distinct count; or
+            #  - for sufficiently long history, CV or relative range is small.
+            min_len_for_scale_free = max(MIN_TRAIN_FOR_INFLUENCE, 10)
+            cv_threshold = 0.10
+            rel_range_threshold = 0.15
             trigger = False
-            if is_fraction_scale:
-                if std < 0.01 or n_unique <= 2:
-                    trigger = True
-            elif is_percent_feature:
-                if std < 0.5 or n_unique <= 2:
+            # Distinct-count heuristic for all numerics
+            if n_unique <= 2:
+                trigger = True
+            # Fraction / percent special-casing retained for clarity
+            if is_fraction_scale and (std < 0.01):
+                trigger = True
+            if is_percent_feature and (std < 0.5):
+                trigger = True
+            # Scale-free heuristics for all numerics
+            if not trigger and len(series) >= min_len_for_scale_free:
+                if cv < cv_threshold or rel_range < rel_range_threshold:
                     trigger = True
             # Record stats
             hist_var_stats[col] = {
                 "std": std,
+                "mean": mean,
                 "n_unique": float(n_unique),
                 "min": vmin,
                 "max": vmax,
                 "range": value_range,
+                "cv": cv,
+                "rel_range": rel_range,
             }
             if trigger:
                 hist_low_variation.append(col)
@@ -717,6 +864,9 @@ def run_multivariate_forecast(
         "fraction_std": 0.01,
         "percent_std": 0.5,
         "min_unique_flag": 2,
+        "cv_threshold": 0.10,
+        "rel_range_threshold": 0.15,
+        "min_len_for_scale_free": int(max(MIN_TRAIN_FOR_INFLUENCE, 10)),
     }
     # Measurement ambiguity (pairs of features that can overlap in explanatory power)
     ambiguity_pairs = []
@@ -724,6 +874,12 @@ def run_multivariate_forecast(
         ambiguity_pairs.append(["inspection_intensity", "defect_rate_pct"])
     if ambiguity_pairs:
         influence_meta["measurement_ambiguity"] = ambiguity_pairs
+    # Collinearity caution for labor capacity proxies
+    collinearity_pairs = []
+    if {"operator_headcount", "effective_operator_fte"}.issubset(set(included)):
+        collinearity_pairs.append(["operator_headcount", "effective_operator_fte"])
+    if collinearity_pairs:
+        influence_meta["collinearity_caution"] = collinearity_pairs
     influence_meta["thresholds"] = {
         "coef_influence_eps": COEF_INFLUENCE_EPS,
         "min_train_for_influence": MIN_TRAIN_FOR_INFLUENCE,
