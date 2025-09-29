@@ -156,50 +156,58 @@ def render_forecasting_view(_tables):
             "sum": "Total Processing Hours (hrs)",
             "count": "Completed Runs (count)",
         }
-        # Forecast settings
-        col_fs1, col_fs2 = st.columns(2)
-        with col_fs1:
-            user_horizon = st.number_input(
-                "Requested Horizon (periods)",
-                min_value=1,
-                max_value=720,
-                value=60,
-                step=1,
-                help="Number of future periods to forecast before adaptive reduction.",
-            )
-            multiplier = st.number_input(
-                "Horizon Multiplier", min_value=0.1, max_value=10.0, value=1.0, step=0.1
-            )
-            adapt = st.checkbox(
-                "Adaptive Horizon",
-                value=True,
-                help="Reduce horizon based on history span * multiplier",
-            )
-            ts_connect = st.checkbox(
-                "Line chart (connect actual points)",
-                value=True,
-                help="If unchecked, show actuals as scatter points only.",
-                key="ts_connect",
-            )
-        with col_fs2:
-            agg_freq = st.selectbox("Aggregation Frequency", ["D", "W", "M"], index=0)
-            agg_metric_label = st.selectbox(
-                "Aggregation Metric",
-                list(AGG_FRIENDLY.keys()),
-                index=0,
-                help="How to aggregate event durations inside each period.",
-                key="ts_metric",
-            )
-            agg_metric = AGG_FRIENDLY[agg_metric_label]
-            baseline_strategy = st.selectbox(
-                "Baseline Strategy", ["mean", "linear"], index=0
-            )
-
         if df.empty:
             st.info("No production_log data available for forecasting.")
         else:
-            run_btn = st.button("Run Forecast")
-            if run_btn:
+            submitted_ts = False
+            with st.form("forecast_ts_form"):
+                col_fs1, col_fs2 = st.columns(2)
+                with col_fs1:
+                    user_horizon = st.number_input(
+                        "Requested Horizon (periods)",
+                        min_value=1,
+                        max_value=720,
+                        value=60,
+                        step=1,
+                        help="Number of future periods to forecast before adaptive reduction.",
+                    )
+                    multiplier = st.number_input(
+                        "Horizon Multiplier",
+                        min_value=0.1,
+                        max_value=10.0,
+                        value=1.0,
+                        step=0.1,
+                    )
+                    adapt = st.checkbox(
+                        "Adaptive Horizon",
+                        value=True,
+                        help="Reduce horizon based on history span * multiplier",
+                    )
+                    ts_connect = st.checkbox(
+                        "Line chart (connect actual points)",
+                        value=True,
+                        help="If unchecked, show actuals as scatter points only.",
+                        key="ts_connect",
+                    )
+                with col_fs2:
+                    agg_freq = st.selectbox(
+                        "Aggregation Frequency", ["D", "W", "M"], index=0
+                    )
+                    agg_metric_label = st.selectbox(
+                        "Aggregation Metric",
+                        list(AGG_FRIENDLY.keys()),
+                        index=0,
+                        help="How to aggregate event durations inside each period.",
+                        key="ts_metric",
+                    )
+                    agg_metric = AGG_FRIENDLY[agg_metric_label]
+                    baseline_strategy = st.selectbox(
+                        "Baseline Strategy", ["mean", "linear"], index=0
+                    )
+
+                submitted_ts = st.form_submit_button("Run Forecast")
+
+            if submitted_ts:
                 try:
                     forecast_path = "time_series_forecasted_data.csv"
                     fc = time_series_forecast(
@@ -264,57 +272,59 @@ def render_forecasting_view(_tables):
         )
         df_lr = _tables.get("production_log", pd.DataFrame())
 
-        # Same basic controls for consistency
-        col_lr1, col_lr2 = st.columns(2)
-        with col_lr1:
-            lr_horizon = st.number_input(
-                "Requested Horizon (periods)",
-                min_value=1,
-                max_value=720,
-                value=60,
-                step=1,
-            )
-
-            lr_multiplier = st.number_input(
-                "Horizon Multiplier",
-                min_value=0.1,
-                max_value=10.0,
-                value=1.0,
-                step=0.1,
-                key="lr_mult",
-            )
-            lr_adapt = st.checkbox(
-                "Adaptive Horizon",
-                value=True,
-                key="lr_adapt",
-                help="Reduce horizon based on history span * multiplier",
-            )
-
-            lr_connect = st.checkbox(
-                "Line chart (connect actual points)",
-                value=True,
-                key="lr_connect",
-                help="If unchecked, show actuals as scatter points only.",
-            )
-
-        with col_lr2:
-            lr_agg_freq = st.selectbox(
-                "Aggregation Frequency", ["D", "W", "M"], index=0, key="lr_freq"
-            )
-            lr_agg_metric_label = st.selectbox(
-                "Aggregation Metric",
-                list(AGG_FRIENDLY.keys()),
-                index=0,
-                key="lr_metric",
-                help="How to aggregate event durations inside each period.",
-            )
-            lr_agg_metric = AGG_FRIENDLY[lr_agg_metric_label]
-
         if df_lr.empty:
             st.info("No production_log data available for regression-based forecasting.")
         else:
-            run_lr = st.button("Run Linear Forecast")
-            if run_lr:
+            submitted_lr = False
+            with st.form("forecast_lr_form"):
+                col_lr1, col_lr2 = st.columns(2)
+                with col_lr1:
+                    lr_horizon = st.number_input(
+                        "Requested Horizon (periods)",
+                        min_value=1,
+                        max_value=720,
+                        value=60,
+                        step=1,
+                    )
+
+                    lr_multiplier = st.number_input(
+                        "Horizon Multiplier",
+                        min_value=0.1,
+                        max_value=10.0,
+                        value=1.0,
+                        step=0.1,
+                        key="lr_mult",
+                    )
+                    lr_adapt = st.checkbox(
+                        "Adaptive Horizon",
+                        value=True,
+                        key="lr_adapt",
+                        help="Reduce horizon based on history span * multiplier",
+                    )
+
+                    lr_connect = st.checkbox(
+                        "Line chart (connect actual points)",
+                        value=True,
+                        key="lr_connect",
+                        help="If unchecked, show actuals as scatter points only.",
+                    )
+
+                with col_lr2:
+                    lr_agg_freq = st.selectbox(
+                        "Aggregation Frequency", ["D", "W", "M"], index=0, key="lr_freq"
+                    )
+                    lr_agg_metric_label = st.selectbox(
+                        "Aggregation Metric",
+                        list(AGG_FRIENDLY.keys()),
+                        index=0,
+                        key="lr_metric",
+                        help="How to aggregate event durations inside each period.",
+                    )
+                    lr_agg_metric = AGG_FRIENDLY[lr_agg_metric_label]
+
+                submitted_lr = st.form_submit_button("Run Linear Forecast")
+
+            if submitted_lr:
                 try:
                     fc_lr = linear_forecast(
                         df_lr,
@@ -375,196 +385,199 @@ def render_forecasting_view(_tables):
             ),
         )
 
-        # Core forecast controls (mirrors earlier sections; unique keys to avoid clashes)
-        col_mv1, col_mv2 = st.columns(2)
-        with col_mv1:
-            mv_horizon = st.number_input(
-                "Requested Horizon (periods)",
-                min_value=1,
-                max_value=720,
-                value=60,
-                step=1,
-                key="mv_horizon",
-            )
-            mv_multiplier = st.number_input(
-                "Horizon Multiplier",
-                min_value=0.1,
-                max_value=10.0,
-                value=1.0,
-                step=0.1,
-                key="mv_mult",
-            )
-            mv_adapt = st.checkbox(
-                "Adaptive Horizon",
-                value=True,
-                key="mv_adapt",
-                help="Reduce horizon based on history span * multiplier",
-            )
-            mv_connect = st.checkbox(
-                "Line chart (connect actual points)",
-                value=True,
-                key="mv_connect",
-                help="If unchecked, show actuals as scatter points only.",
-            )
-        with col_mv2:
-            mv_agg_freq = st.selectbox(
-                "Aggregation Frequency", ["D", "W", "M"], index=0, key="mv_freq"
-            )
-            mv_agg_metric_label = st.selectbox(
-                "Aggregation Metric",
-                list(AGG_FRIENDLY.keys()),
-                index=0,
-                key="mv_metric",
-                help="How to aggregate event durations inside each period.",
-            )
-            mv_agg_metric = AGG_FRIENDLY[mv_agg_metric_label]
-
-        # No explicit baseline strategy selector here; multivariate regression will auto-fallback
-        # to persistence (extend last or single value) only when data is insufficient.
-
-        st.markdown("---")
-        st.subheader("Scenario Variables")
-        st.caption(
-            "Select variables to include in the model. Historical values are derived from data; your inputs apply only to future periods."
-        )
-
-        # Centralized defaults & label mapping now provided by ml.multivariate_forecast
-        _mv_defaults = compute_feature_defaults(_tables)
-        default_defect_rate = _mv_defaults.get("defect_rate_pct", 5.0)
-        night_share_default = _mv_defaults.get("shift_night_share", 0.0)
-        energy_default = _mv_defaults.get("avg_energy_consumption", 0.0)
-        wip_default = _mv_defaults.get("wip_proxy", 0.0)
-        cov_default = _mv_defaults.get("inspection_intensity", 0.0)
-        headcount_default = int(round(_mv_defaults.get("operator_headcount", 0.0) or 0.0))
-        eff_fte_default = float(_mv_defaults.get("effective_operator_fte", 0.0) or 0.0)
-
-        col_vars1, col_vars2 = st.columns(2)
-        with col_vars1:
-            inc_defect_rate = st.checkbox(
-                "Defect rate %",
-                value=False,
-                key="mv_inc_defect",
-                help="Feature key: defect_rate_pct (fails/total * 100)",
-            )
-            inc_shift_night = st.checkbox(
-                "Night shift share",
-                value=False,
-                key="mv_inc_shift_night",
-                help="Feature key: shift_night_share (night events / total events)",
-            )
-            inc_inspection = st.checkbox(
-                "Inspection coverage",
-                value=False,
-                key="mv_inc_inspection_cov",
-                help="Feature key: inspection_intensity (inspected units / produced units)",
-            )
-            inc_headcount = st.checkbox(
-                "Operator headcount",
-                value=False,
-                key="mv_inc_headcount",
-                help="Feature key: operator_headcount (distinct operators active per period). " \
-                "Simple presence/headcount proxy — does not reflect hours worked. " \
-            )
-        with col_vars2:
-            inc_energy = st.checkbox(
-                "Avg energy consumption",
-                value=False,
-                key="mv_inc_energy",
-                help="Feature key: avg_energy_consumption (mean energy metric)",
-            )
-            inc_wip_proxy = st.checkbox(
-                "WIP proxy (fraction)",
-                value=False,
-                key="mv_inc_wip_proxy",
-                help="Feature key: wip_proxy (in-progress / total events per period)",
-            )
-            inc_eff_fte = st.checkbox(
-                "Effective operator FTE",
-                value=False,
-                key="mv_inc_eff_fte",
-                help="Feature key: effective_operator_fte (sum of operator work hours per period / 8h). " \
-                "A capacity (FTE) measure that reflects hours worked.",
-            )
-
-        # Inputs for selected variables
-        col_inputs1, col_inputs2 = st.columns(2)
-        with col_inputs1:
-            if inc_defect_rate:
-                defect_rate_pct = st.slider(
-                    "Assumed Defect Rate %",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=float(round(default_defect_rate, 2)),
-                    step=0.5,
-                    key="mv_defect_rate",
-                )
-        if inc_shift_night:
-            with col_inputs1:
-                shift_night_share = st.slider(
-                    "Assumed Night Shift Share",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=float(round(night_share_default, 2)),
-                    step=0.01,
-                    key="mv_shift_night_share",
-                )
-        if inc_inspection:
-            with col_inputs1:
-                inspection_cov = st.slider(
-                    "Assumed Inspection Coverage (fraction)",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=cov_default,
-                    step=0.01,
-                    key="mv_inspection_cov",
-                )
-        if inc_headcount:
-            with col_inputs1:
-                # Dynamic max: at least 10, else ~2x default
-                max_headcount = int(max(10, (headcount_default or 0) * 2))
-                operator_headcount_val = st.slider(
-                    "Assumed Operator Headcount",
-                    min_value=0,
-                    max_value=max_headcount,
-                    value=int(min(headcount_default, max_headcount)),
+        submitted_mv = False
+        with st.form("forecast_mv_form"):
+            # Core forecast controls (mirrors earlier sections; unique keys to avoid clashes)
+            col_mv1, col_mv2 = st.columns(2)
+            with col_mv1:
+                mv_horizon = st.number_input(
+                    "Requested Horizon (periods)",
+                    min_value=1,
+                    max_value=720,
+                    value=60,
                     step=1,
-                    key="mv_operator_headcount",
+                    key="mv_horizon",
                 )
-        with col_inputs2:
-            if inc_energy:
-                avg_energy_consumption = st.slider(
-                    "Assumed Avg Energy Consumption",
-                    min_value=0.0,
-                    max_value=float(max(10.0, energy_default * 3 or 100.0)),
-                    value=energy_default,
+                mv_multiplier = st.number_input(
+                    "Horizon Multiplier",
+                    min_value=0.1,
+                    max_value=10.0,
+                    value=1.0,
                     step=0.1,
-                    key="mv_avg_energy_consumption",
+                    key="mv_mult",
                 )
-            if inc_wip_proxy:
-                wip_proxy_val = st.slider(
-                    "Assumed WIP Proxy (fraction)",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=wip_default,
-                    step=0.01,
-                    key="mv_wip_proxy",
+                mv_adapt = st.checkbox(
+                    "Adaptive Horizon",
+                    value=True,
+                    key="mv_adapt",
+                    help="Reduce horizon based on history span * multiplier",
                 )
-            if inc_eff_fte:
-                # Dynamic max: relate to headcount if available, else fallback to 10
-                dynamic_cap = (headcount_default or 0) * 2
-                max_eff_fte = float(max(10.0, dynamic_cap if dynamic_cap > 0 else 10.0))
-                eff_fte_val = st.slider(
-                    "Assumed Effective Operator FTE",
-                    min_value=0.0,
-                    max_value=max_eff_fte,
-                    value=float(min(eff_fte_default or 0.0, max_eff_fte)),
-                    step=0.1,
-                    key="mv_effective_operator_fte",
+                mv_connect = st.checkbox(
+                    "Line chart (connect actual points)",
+                    value=True,
+                    key="mv_connect",
+                    help="If unchecked, show actuals as scatter points only.",
+                )
+            with col_mv2:
+                mv_agg_freq = st.selectbox(
+                    "Aggregation Frequency", ["D", "W", "M"], index=0, key="mv_freq"
+                )
+                mv_agg_metric_label = st.selectbox(
+                    "Aggregation Metric",
+                    list(AGG_FRIENDLY.keys()),
+                    index=0,
+                    key="mv_metric",
+                    help="How to aggregate event durations inside each period.",
+                )
+                mv_agg_metric = AGG_FRIENDLY[mv_agg_metric_label]
+
+            # No explicit baseline strategy selector here; multivariate regression will auto-fallback
+            # to persistence (extend last or single value) only when data is insufficient.
+
+            st.markdown("---")
+            st.subheader("Scenario Variables")
+            st.caption(
+                "Select variables to include in the model. Historical values are derived from data; your inputs apply only to future periods."
+            )
+
+            # Centralized defaults & label mapping now provided by ml.multivariate_forecast
+            _mv_defaults = compute_feature_defaults(_tables)
+            default_defect_rate = _mv_defaults.get("defect_rate_pct", 5.0)
+            night_share_default = _mv_defaults.get("shift_night_share", 0.0)
+            energy_default = _mv_defaults.get("avg_energy_consumption", 0.0)
+            wip_default = _mv_defaults.get("wip_proxy", 0.0)
+            cov_default = _mv_defaults.get("inspection_intensity", 0.0)
+            headcount_default = int(round(_mv_defaults.get("operator_headcount", 0.0) or 0.0))
+            eff_fte_default = float(_mv_defaults.get("effective_operator_fte", 0.0) or 0.0)
+
+            col_vars1, col_vars2 = st.columns(2)
+            with col_vars1:
+                inc_defect_rate = st.checkbox(
+                    "Defect rate %",
+                    value=False,
+                    key="mv_inc_defect",
+                    help="Feature key: defect_rate_pct (fails/total * 100)",
+                )
+                inc_shift_night = st.checkbox(
+                    "Night shift share",
+                    value=False,
+                    key="mv_inc_shift_night",
+                    help="Feature key: shift_night_share (night events / total events)",
+                )
+                inc_inspection = st.checkbox(
+                    "Inspection coverage",
+                    value=False,
+                    key="mv_inc_inspection_cov",
+                    help="Feature key: inspection_intensity (inspected units / produced units)",
+                )
+                inc_headcount = st.checkbox(
+                    "Operator headcount",
+                    value=False,
+                    key="mv_inc_headcount",
+                    help="Feature key: operator_headcount (distinct operators active per period). " \
+                    "Simple presence/headcount proxy — does not reflect hours worked. " \
+                )
+            with col_vars2:
+                inc_energy = st.checkbox(
+                    "Avg energy consumption",
+                    value=False,
+                    key="mv_inc_energy",
+                    help="Feature key: avg_energy_consumption (mean energy metric)",
+                )
+                inc_wip_proxy = st.checkbox(
+                    "WIP proxy (fraction)",
+                    value=False,
+                    key="mv_inc_wip_proxy",
+                    help="Feature key: wip_proxy (in-progress / total events per period)",
+                )
+                inc_eff_fte = st.checkbox(
+                    "Effective operator FTE",
+                    value=False,
+                    key="mv_inc_eff_fte",
+                    help="Feature key: effective_operator_fte (sum of operator work hours per period / 8h). " \
+                    "A capacity (FTE) measure that reflects hours worked.",
                 )
 
-        st.markdown("---")
-        run_mv = st.button("Generate Multivariate Scenario Forecast")
-        if run_mv:
+            # Inputs for selected variables
+            col_inputs1, col_inputs2 = st.columns(2)
+            with col_inputs1:
+                if inc_defect_rate:
+                    defect_rate_pct = st.slider(
+                        "Assumed Defect Rate %",
+                        min_value=0.0,
+                        max_value=100.0,
+                        value=float(round(default_defect_rate, 2)),
+                        step=0.5,
+                        key="mv_defect_rate",
+                    )
+            if inc_shift_night:
+                with col_inputs1:
+                    shift_night_share = st.slider(
+                        "Assumed Night Shift Share",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=float(round(night_share_default, 2)),
+                        step=0.01,
+                        key="mv_shift_night_share",
+                    )
+            if inc_inspection:
+                with col_inputs1:
+                    inspection_cov = st.slider(
+                        "Assumed Inspection Coverage (fraction)",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=cov_default,
+                        step=0.01,
+                        key="mv_inspection_cov",
+                    )
+            if inc_headcount:
+                with col_inputs1:
+                    # Dynamic max: at least 10, else ~2x default
+                    max_headcount = int(max(10, (headcount_default or 0) * 2))
+                    operator_headcount_val = st.slider(
+                        "Assumed Operator Headcount",
+                        min_value=0,
+                        max_value=max_headcount,
+                        value=int(min(headcount_default, max_headcount)),
+                        step=1,
+                        key="mv_operator_headcount",
+                    )
+            with col_inputs2:
+                if inc_energy:
+                    avg_energy_consumption = st.slider(
+                        "Assumed Avg Energy Consumption",
+                        min_value=0.0,
+                        max_value=float(max(10.0, energy_default * 3 or 100.0)),
+                        value=energy_default,
+                        step=0.1,
+                        key="mv_avg_energy_consumption",
+                    )
+                if inc_wip_proxy:
+                    wip_proxy_val = st.slider(
+                        "Assumed WIP Proxy (fraction)",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=wip_default,
+                        step=0.01,
+                        key="mv_wip_proxy",
+                    )
+                if inc_eff_fte:
+                    # Dynamic max: relate to headcount if available, else fallback to 10
+                    dynamic_cap = (headcount_default or 0) * 2
+                    max_eff_fte = float(max(10.0, dynamic_cap if dynamic_cap > 0 else 10.0))
+                    eff_fte_val = st.slider(
+                        "Assumed Effective Operator FTE",
+                        min_value=0.0,
+                        max_value=max_eff_fte,
+                        value=float(min(eff_fte_default or 0.0, max_eff_fte)),
+                        step=0.1,
+                        key="mv_effective_operator_fte",
+                    )
+
+            st.markdown("---")
+            submitted_mv = st.form_submit_button("Generate Multivariate Scenario Forecast")
+
+        if submitted_mv:
             scenario = {
                 "horizon": int(mv_horizon),
                 "adapt_horizon": bool(mv_adapt),
