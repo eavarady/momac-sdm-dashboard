@@ -29,4 +29,4 @@ COPY . /app
 EXPOSE 8080
 
 # Streamlit needs to bind to 0.0.0.0 on Cloud Run and use the PORT env var
-CMD ["bash", "-lc", "streamlit run src/dashboard/app.py --server.port=${PORT} --server.address=0.0.0.0 --server.headless=true"]
+CMD ["bash", "-lc", "streamlit run src/dashboard/welcome.py --server.port=${PORT} --server.address=0.0.0.0 --server.headless=true"]
