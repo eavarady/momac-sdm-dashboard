@@ -821,7 +821,7 @@ def render_tracking_view(_tables):
 
     # Show throughput per hour with one decimal
 
-    col1.metric("Throughput (units/hr)", f"{kpis.get('throughput') * 3600.0:.5f}")
+    col1.metric("Throughput (units/hr)", f"{kpis.get('throughput') * 3600.0:.1f}")
     col2.metric(
         "Throughput (units/day)", f"{(kpis.get('throughput') * 3600.0 * 24):.1f}"
     )
