@@ -23,6 +23,8 @@ with col1:
         st.write(
             "Login functionality not implemented yet. This would connect to the company's actual data systems."
         )
+        # Future implementation includes authentication
+        # st.switch_page("pages/app.py")
 
 with col2:
     if st.button("DEMO", use_container_width=True):

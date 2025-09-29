@@ -48,7 +48,7 @@ def _normalize_dimension_table(
     return norm[required].copy()
 
 
-def read_csv_tables() -> Dict[str, pd.DataFrame]:
+def read_csv_tables(prefix: str = "") -> Dict[str, pd.DataFrame]:
     tables = {}
     _LAST_LOAD_STATS.clear()
     for name in [
@@ -64,7 +64,7 @@ def read_csv_tables() -> Dict[str, pd.DataFrame]:
         # Canonical run metadata
         "runs",
     ]:
-        path = DATA_DIR / f"{name}.csv"
+        path = DATA_DIR / f"{prefix}{name}.csv"
         if path.exists():
             # Read CSV but tolerate empty or whitespace-only files (pandas.EmptyDataError)
             try:

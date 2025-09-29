@@ -1515,7 +1515,7 @@ with st.sidebar:
 # Load data (fast-fail): if any table is invalid, surface the error and stop
 try:
     if source == "CSV":
-        _tables = read_csv_tables()
+        _tables = read_csv_tables(prefix="mock_")
 
     elif source == "Google Sheets":
         if not spreadsheet_id:
