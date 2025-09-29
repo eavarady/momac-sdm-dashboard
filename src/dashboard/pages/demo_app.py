@@ -1467,7 +1467,9 @@ def render_tracking_view(_tables):
 
 with st.sidebar:
     st.header("Data Source")
-    source = st.radio("Select source", ["CSV", "Google Sheets", "Excel"], index=0)
+    source = st.radio(
+        "Select source", ["Simulated Data", "CSV", "Google Sheets", "Excel"], index=0
+    )  # Default to "Simulated Data"
 
     if source == "Google Sheets":
         st.caption("OAuth will prompt in your browser on first use.")
@@ -1515,7 +1517,10 @@ with st.sidebar:
 # Load data (fast-fail): if any table is invalid, surface the error and stop
 try:
     if source == "CSV":
-        _tables = read_csv_tables(prefix="mock_")
+        _tables = read_csv_tables()  # Real CSV data (no prefix, if needed)
+
+    elif source == "Simulated Data":
+        _tables = read_csv_tables(prefix="mock_")  # Simulated/mock data
 
     elif source == "Google Sheets":
         if not spreadsheet_id:
