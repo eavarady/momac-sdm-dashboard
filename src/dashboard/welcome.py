@@ -2,11 +2,11 @@ import streamlit as st
 
 st.set_page_config(page_title="MOMAC SDM Dashboard", layout="wide")
 
-st.title("Welcome to MOMAC SDM Dashboard")
+st.title("Welcome to MOMAC Software-Defined Manufacturing")
 
 st.write(
     """
-This dashboard provides comprehensive analytics for MOMAC SDM operations, including:
+This dashboard provides comprehensive analytics for MOMAC's SDM operations, including:
 - Key Performance Indicator (KPI) calculations for cycle time, throughput, labor efficiency, and more
 - Bottleneck detection in production processes
 - Time series forecasting and multivariate forecasting for production metrics
