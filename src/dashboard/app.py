@@ -385,6 +385,9 @@ def render_forecasting_view(_tables):
             ),
         )
 
+        # Track confirmed scenario variable selection across reruns
+        confirmed_selection = st.session_state.get("mv_confirmed_selection")
+
         submitted_mv = False
         with st.form("forecast_mv_form"):
             # Core forecast controls (mirrors earlier sections; unique keys to avoid clashes)
@@ -498,84 +501,114 @@ def render_forecasting_view(_tables):
                     "A capacity (FTE) measure that reflects hours worked.",
                 )
 
-            # Inputs for selected variables
-            col_inputs1, col_inputs2 = st.columns(2)
-            with col_inputs1:
-                if inc_defect_rate:
-                    defect_rate_pct = st.slider(
-                        "Assumed Defect Rate %",
-                        min_value=0.0,
-                        max_value=100.0,
-                        value=float(round(default_defect_rate, 2)),
-                        step=0.5,
-                        key="mv_defect_rate",
-                    )
-            if inc_shift_night:
+            # Confirmation workflow for scenario variable selection
+            current_selection = {
+                "inc_defect_rate": bool(st.session_state.get("mv_inc_defect", False)),
+                "inc_shift_night": bool(st.session_state.get("mv_inc_shift_night", False)),
+                "inc_inspection": bool(st.session_state.get("mv_inc_inspection_cov", False)),
+                "inc_headcount": bool(st.session_state.get("mv_inc_headcount", False)),
+                "inc_energy": bool(st.session_state.get("mv_inc_energy", False)),
+                "inc_wip_proxy": bool(st.session_state.get("mv_inc_wip_proxy", False)),
+                "inc_eff_fte": bool(st.session_state.get("mv_inc_eff_fte", False)),
+            }
+            confirm_selection = st.form_submit_button("Confirm selection")
+            if confirm_selection:
+                confirmed_selection = current_selection.copy()
+                st.session_state["mv_confirmed_selection"] = confirmed_selection
+
+            active_selection = confirmed_selection or {}
+            show_sliders = active_selection and any(active_selection.values())
+
+            if show_sliders:
+                col_inputs1, col_inputs2 = st.columns(2)
                 with col_inputs1:
-                    shift_night_share = st.slider(
-                        "Assumed Night Shift Share",
-                        min_value=0.0,
-                        max_value=1.0,
-                        value=float(round(night_share_default, 2)),
-                        step=0.01,
-                        key="mv_shift_night_share",
-                    )
-            if inc_inspection:
-                with col_inputs1:
-                    inspection_cov = st.slider(
-                        "Assumed Inspection Coverage (fraction)",
-                        min_value=0.0,
-                        max_value=1.0,
-                        value=cov_default,
-                        step=0.01,
-                        key="mv_inspection_cov",
-                    )
-            if inc_headcount:
-                with col_inputs1:
-                    # Dynamic max: at least 10, else ~2x default
-                    max_headcount = int(max(10, (headcount_default or 0) * 2))
-                    operator_headcount_val = st.slider(
-                        "Assumed Operator Headcount",
-                        min_value=0,
-                        max_value=max_headcount,
-                        value=int(min(headcount_default, max_headcount)),
-                        step=1,
-                        key="mv_operator_headcount",
-                    )
-            with col_inputs2:
-                if inc_energy:
-                    avg_energy_consumption = st.slider(
-                        "Assumed Avg Energy Consumption",
-                        min_value=0.0,
-                        max_value=float(max(10.0, energy_default * 3 or 100.0)),
-                        value=energy_default,
-                        step=0.1,
-                        key="mv_avg_energy_consumption",
-                    )
-                if inc_wip_proxy:
-                    wip_proxy_val = st.slider(
-                        "Assumed WIP Proxy (fraction)",
-                        min_value=0.0,
-                        max_value=1.0,
-                        value=wip_default,
-                        step=0.01,
-                        key="mv_wip_proxy",
-                    )
-                if inc_eff_fte:
-                    # Dynamic max: relate to headcount if available, else fallback to 10
-                    dynamic_cap = (headcount_default or 0) * 2
-                    max_eff_fte = float(max(10.0, dynamic_cap if dynamic_cap > 0 else 10.0))
-                    eff_fte_val = st.slider(
-                        "Assumed Effective Operator FTE",
-                        min_value=0.0,
-                        max_value=max_eff_fte,
-                        value=float(min(eff_fte_default or 0.0, max_eff_fte)),
-                        step=0.1,
-                        key="mv_effective_operator_fte",
-                    )
+                    if active_selection.get("inc_defect_rate"):
+                        st.slider(
+                            "Assumed Defect Rate %",
+                            min_value=0.0,
+                            max_value=100.0,
+                            value=float(round(default_defect_rate, 2)),
+                            step=0.5,
+                            key="mv_defect_rate",
+                        )
+                    if active_selection.get("inc_shift_night"):
+                        st.slider(
+                            "Assumed Night Shift Share",
+                            min_value=0.0,
+                            max_value=1.0,
+                            value=float(round(night_share_default, 2)),
+                            step=0.01,
+                            key="mv_shift_night_share",
+                        )
+                    if active_selection.get("inc_inspection"):
+                        st.slider(
+                            "Assumed Inspection Coverage (fraction)",
+                            min_value=0.0,
+                            max_value=1.0,
+                            value=cov_default,
+                            step=0.01,
+                            key="mv_inspection_cov",
+                        )
+                    if active_selection.get("inc_headcount"):
+                        max_headcount = int(max(10, (headcount_default or 0) * 2))
+                        st.slider(
+                            "Assumed Operator Headcount",
+                            min_value=0,
+                            max_value=max_headcount,
+                            value=int(min(headcount_default, max_headcount)),
+                            step=1,
+                            key="mv_operator_headcount",
+                        )
+                with col_inputs2:
+                    if active_selection.get("inc_energy"):
+                        st.slider(
+                            "Assumed Avg Energy Consumption",
+                            min_value=0.0,
+                            max_value=float(max(10.0, energy_default * 3 or 100.0)),
+                            value=energy_default,
+                            step=0.1,
+                            key="mv_avg_energy_consumption",
+                        )
+                    if active_selection.get("inc_wip_proxy"):
+                        st.slider(
+                            "Assumed WIP Proxy (fraction)",
+                            min_value=0.0,
+                            max_value=1.0,
+                            value=wip_default,
+                            step=0.01,
+                            key="mv_wip_proxy",
+                        )
+                    if active_selection.get("inc_eff_fte"):
+                        dynamic_cap = (headcount_default or 0) * 2
+                        max_eff_fte = float(max(10.0, dynamic_cap if dynamic_cap > 0 else 10.0))
+                        st.slider(
+                            "Assumed Effective Operator FTE",
+                            min_value=0.0,
+                            max_value=max_eff_fte,
+                            value=float(min(eff_fte_default or 0.0, max_eff_fte)),
+                            step=0.1,
+                            key="mv_effective_operator_fte",
+                        )
+            else:
+                st.caption("Select scenario variables and confirm to configure assumptions.")
 
             st.markdown("---")
             submitted_mv = st.form_submit_button("Generate Multivariate Scenario Forecast")
+
+        # Treat running the forecast as confirmation of the current selection (if any)
+        if submitted_mv:
+            current_selection_state = {
+                "inc_defect_rate": bool(st.session_state.get("mv_inc_defect", False)),
+                "inc_shift_night": bool(st.session_state.get("mv_inc_shift_night", False)),
+                "inc_inspection": bool(st.session_state.get("mv_inc_inspection_cov", False)),
+                "inc_headcount": bool(st.session_state.get("mv_inc_headcount", False)),
+                "inc_energy": bool(st.session_state.get("mv_inc_energy", False)),
+                "inc_wip_proxy": bool(st.session_state.get("mv_inc_wip_proxy", False)),
+                "inc_eff_fte": bool(st.session_state.get("mv_inc_eff_fte", False)),
+            }
+            if current_selection_state:
+                confirmed_selection = current_selection_state.copy()
+                st.session_state["mv_confirmed_selection"] = confirmed_selection
 
         if submitted_mv:
             scenario = {
@@ -587,44 +620,66 @@ def render_forecasting_view(_tables):
                 "assumptions": {},
             }
             # (operator_count, shift_type removed)
-            if inc_defect_rate:
+            sel_defect = (confirmed_selection or {}).get("inc_defect_rate")
+            sel_shift = (confirmed_selection or {}).get("inc_shift_night")
+            sel_energy = (confirmed_selection or {}).get("inc_energy")
+            sel_wip = (confirmed_selection or {}).get("inc_wip_proxy")
+            sel_inspection = (confirmed_selection or {}).get("inc_inspection")
+            sel_headcount = (confirmed_selection or {}).get("inc_headcount")
+            sel_eff_fte = (confirmed_selection or {}).get("inc_eff_fte")
+
+            if sel_defect:
                 fk = FEATURE_LABELS["Defect rate %"]
                 scenario["included_variables"].append(fk)
-                scenario["assumptions"][fk] = defect_rate_pct
-            if inc_shift_night:
+                scenario["assumptions"][fk] = st.session_state.get(
+                    "mv_defect_rate", float(round(default_defect_rate, 2))
+                )
+            if sel_shift:
                 fk = FEATURE_LABELS["Night shift share"]
                 scenario["included_variables"].append(fk)
-                scenario["assumptions"][fk] = shift_night_share
-            if inc_energy:
+                scenario["assumptions"][fk] = st.session_state.get(
+                    "mv_shift_night_share", float(round(night_share_default, 2))
+                )
+            if sel_energy:
                 fk = FEATURE_LABELS["Avg energy consumption"]
                 scenario["included_variables"].append(fk)
-                scenario["assumptions"][fk] = avg_energy_consumption
-            if inc_wip_proxy:
+                scenario["assumptions"][fk] = st.session_state.get(
+                    "mv_avg_energy_consumption", energy_default
+                )
+            if sel_wip:
                 fk = FEATURE_LABELS["WIP proxy (fraction)"]
                 scenario["included_variables"].append(fk)
-                scenario["assumptions"][fk] = wip_proxy_val
-            if inc_inspection:
+                scenario["assumptions"][fk] = st.session_state.get(
+                    "mv_wip_proxy", wip_default
+                )
+            if sel_inspection:
                 fk = FEATURE_LABELS["Inspection coverage"]
                 scenario["included_variables"].append(fk)
-                scenario["assumptions"][fk] = inspection_cov
-            if inc_headcount:
+                scenario["assumptions"][fk] = st.session_state.get(
+                    "mv_inspection_cov", cov_default
+                )
+            if sel_headcount:
                 fk = FEATURE_LABELS["Operator headcount"]
                 scenario["included_variables"].append(fk)
-                scenario["assumptions"][fk] = int(operator_headcount_val)
-            if inc_eff_fte:
+                scenario["assumptions"][fk] = int(
+                    st.session_state.get("mv_operator_headcount", headcount_default)
+                )
+            if sel_eff_fte:
                 fk = FEATURE_LABELS["Effective operator FTE"]
                 scenario["included_variables"].append(fk)
-                scenario["assumptions"][fk] = float(eff_fte_val)
+                scenario["assumptions"][fk] = float(
+                    st.session_state.get("mv_effective_operator_fte", eff_fte_default)
+                )
             # Debug safeguard: if inclusion unexpectedly empty but a checkbox was selected
             if not scenario["included_variables"] and any(
                 [
-                    inc_defect_rate,
-                    inc_shift_night,
-                    inc_energy,
-                    inc_wip_proxy,
-                    inc_inspection,
-                    inc_headcount,
-                    inc_eff_fte,
+                    sel_defect,
+                    sel_shift,
+                    sel_energy,
+                    sel_wip,
+                    sel_inspection,
+                    sel_headcount,
+                    sel_eff_fte,
                 ]
             ):
                 st.warning(
