@@ -385,15 +385,24 @@ def render_forecasting_view(_tables):
             ),
         )
 
-        # Track confirmed scenario variable selection across reruns
-        confirmed_selection = st.session_state.get("mv_confirmed_selection")
+        # Track confirmed scenario setup across reruns
+        confirmed_selection = st.session_state.get("mv_confirmed_selection", {})
+        confirmed_settings = st.session_state.get("mv_confirmed_settings")
 
-        submitted_mv = False
-        with st.form("forecast_mv_form"):
-            # Core forecast controls (mirrors earlier sections; unique keys to avoid clashes)
+        # Centralized defaults & label mapping now provided by ml.multivariate_forecast
+        _mv_defaults = compute_feature_defaults(_tables)
+        default_defect_rate = _mv_defaults.get("defect_rate_pct", 5.0)
+        night_share_default = _mv_defaults.get("shift_night_share", 0.0)
+        energy_default = _mv_defaults.get("avg_energy_consumption", 0.0)
+        wip_default = _mv_defaults.get("wip_proxy", 0.0)
+        cov_default = _mv_defaults.get("inspection_intensity", 0.0)
+        headcount_default = int(round(_mv_defaults.get("operator_headcount", 0.0) or 0.0))
+        eff_fte_default = float(_mv_defaults.get("effective_operator_fte", 0.0) or 0.0)
+
+        with st.form("forecast_mv_setup_form"):
             col_mv1, col_mv2 = st.columns(2)
             with col_mv1:
-                mv_horizon = st.number_input(
+                st.number_input(
                     "Requested Horizon (periods)",
                     min_value=1,
                     max_value=720,
@@ -401,7 +410,7 @@ def render_forecasting_view(_tables):
                     step=1,
                     key="mv_horizon",
                 )
-                mv_multiplier = st.number_input(
+                st.number_input(
                     "Horizon Multiplier",
                     min_value=0.1,
                     max_value=10.0,
@@ -409,33 +418,29 @@ def render_forecasting_view(_tables):
                     step=0.1,
                     key="mv_mult",
                 )
-                mv_adapt = st.checkbox(
+                st.checkbox(
                     "Adaptive Horizon",
                     value=True,
                     key="mv_adapt",
                     help="Reduce horizon based on history span * multiplier",
                 )
-                mv_connect = st.checkbox(
+                st.checkbox(
                     "Line chart (connect actual points)",
                     value=True,
                     key="mv_connect",
                     help="If unchecked, show actuals as scatter points only.",
                 )
             with col_mv2:
-                mv_agg_freq = st.selectbox(
+                st.selectbox(
                     "Aggregation Frequency", ["D", "W", "M"], index=0, key="mv_freq"
                 )
-                mv_agg_metric_label = st.selectbox(
+                st.selectbox(
                     "Aggregation Metric",
                     list(AGG_FRIENDLY.keys()),
                     index=0,
                     key="mv_metric",
                     help="How to aggregate event durations inside each period.",
                 )
-                mv_agg_metric = AGG_FRIENDLY[mv_agg_metric_label]
-
-            # No explicit baseline strategy selector here; multivariate regression will auto-fallback
-            # to persistence (extend last or single value) only when data is insufficient.
 
             st.markdown("---")
             st.subheader("Scenario Variables")
@@ -443,66 +448,58 @@ def render_forecasting_view(_tables):
                 "Select variables to include in the model. Historical values are derived from data; your inputs apply only to future periods."
             )
 
-            # Centralized defaults & label mapping now provided by ml.multivariate_forecast
-            _mv_defaults = compute_feature_defaults(_tables)
-            default_defect_rate = _mv_defaults.get("defect_rate_pct", 5.0)
-            night_share_default = _mv_defaults.get("shift_night_share", 0.0)
-            energy_default = _mv_defaults.get("avg_energy_consumption", 0.0)
-            wip_default = _mv_defaults.get("wip_proxy", 0.0)
-            cov_default = _mv_defaults.get("inspection_intensity", 0.0)
-            headcount_default = int(round(_mv_defaults.get("operator_headcount", 0.0) or 0.0))
-            eff_fte_default = float(_mv_defaults.get("effective_operator_fte", 0.0) or 0.0)
-
             col_vars1, col_vars2 = st.columns(2)
             with col_vars1:
-                inc_defect_rate = st.checkbox(
-                    "Defect rate %",
-                    value=False,
-                    key="mv_inc_defect",
-                    help="Feature key: defect_rate_pct (fails/total * 100)",
-                )
-                inc_shift_night = st.checkbox(
+                st.checkbox(
                     "Night shift share",
                     value=False,
                     key="mv_inc_shift_night",
                     help="Feature key: shift_night_share (night events / total events)",
                 )
-                inc_inspection = st.checkbox(
+                st.checkbox(
                     "Inspection coverage",
                     value=False,
                     key="mv_inc_inspection_cov",
                     help="Feature key: inspection_intensity (inspected units / produced units)",
                 )
-                inc_headcount = st.checkbox(
+                st.checkbox(
                     "Operator headcount",
                     value=False,
                     key="mv_inc_headcount",
-                    help="Feature key: operator_headcount (distinct operators active per period). " \
-                    "Simple presence/headcount proxy — does not reflect hours worked. " \
+                    help="Feature key: operator_headcount (distinct operators active per period). "
+                    "Simple presence/headcount proxy — does not reflect hours worked. ",
+                )
+                st.checkbox(
+                    "Effective operator FTE",
+                    value=False,
+                    key="mv_inc_eff_fte",
+                    help="Feature key: effective_operator_fte (sum of operator work hours per period / 8h). "
+                    "A capacity (FTE) measure that reflects hours worked.",
                 )
             with col_vars2:
-                inc_energy = st.checkbox(
+                st.checkbox(
                     "Avg energy consumption",
                     value=False,
                     key="mv_inc_energy",
                     help="Feature key: avg_energy_consumption (mean energy metric)",
                 )
-                inc_wip_proxy = st.checkbox(
+                st.checkbox(
                     "WIP proxy (fraction)",
                     value=False,
                     key="mv_inc_wip_proxy",
                     help="Feature key: wip_proxy (in-progress / total events per period)",
                 )
-                inc_eff_fte = st.checkbox(
-                    "Effective operator FTE",
+                st.checkbox(
+                    "Defect rate %",
                     value=False,
-                    key="mv_inc_eff_fte",
-                    help="Feature key: effective_operator_fte (sum of operator work hours per period / 8h). " \
-                    "A capacity (FTE) measure that reflects hours worked.",
+                    key="mv_inc_defect",
+                    help="Feature key: defect_rate_pct (fails/total * 100)",
                 )
 
-            # Confirmation workflow for scenario variable selection
-            current_selection = {
+            confirm_setup = st.form_submit_button("Confirm Selection And Continue")
+
+        if confirm_setup:
+            selection_snapshot = {
                 "inc_defect_rate": bool(st.session_state.get("mv_inc_defect", False)),
                 "inc_shift_night": bool(st.session_state.get("mv_inc_shift_night", False)),
                 "inc_inspection": bool(st.session_state.get("mv_inc_inspection_cov", False)),
@@ -511,27 +508,54 @@ def render_forecasting_view(_tables):
                 "inc_wip_proxy": bool(st.session_state.get("mv_inc_wip_proxy", False)),
                 "inc_eff_fte": bool(st.session_state.get("mv_inc_eff_fte", False)),
             }
-            confirm_selection = st.form_submit_button("Confirm selection")
-            if confirm_selection:
-                confirmed_selection = current_selection.copy()
+            if not any(selection_snapshot.values()):
+                st.warning("Select at least one scenario variable before confirming.")
+                st.session_state.pop("mv_confirmed_selection", None)
+                st.session_state.pop("mv_confirmed_settings", None)
+                confirmed_selection = {}
+                confirmed_settings = None
+            else:
+                confirmed_selection = selection_snapshot.copy()
+                mv_metric_label = st.session_state.get("mv_metric", list(AGG_FRIENDLY.keys())[0])
+                confirmed_settings = {
+                    "horizon": int(st.session_state.get("mv_horizon", 60)),
+                    "horizon_multiplier": float(st.session_state.get("mv_mult", 1.0)),
+                    "adapt_horizon": bool(st.session_state.get("mv_adapt", True)),
+                    "connect": bool(st.session_state.get("mv_connect", True)),
+                    "agg_freq": st.session_state.get("mv_freq", "D"),
+                    "agg_metric_label": mv_metric_label,
+                    "agg_metric": AGG_FRIENDLY.get(mv_metric_label, "mean"),
+                }
                 st.session_state["mv_confirmed_selection"] = confirmed_selection
+                st.session_state["mv_confirmed_settings"] = confirmed_settings
+                # Remove stale slider state for unselected variables
+                slider_keys = {
+                    "inc_defect_rate": "mv_defect_rate",
+                    "inc_shift_night": "mv_shift_night_share",
+                    "inc_inspection": "mv_inspection_cov",
+                    "inc_headcount": "mv_operator_headcount",
+                    "inc_energy": "mv_avg_energy_consumption",
+                    "inc_wip_proxy": "mv_wip_proxy",
+                    "inc_eff_fte": "mv_effective_operator_fte",
+                }
+                for key, slider_key in slider_keys.items():
+                    if not confirmed_selection.get(key):
+                        st.session_state.pop(slider_key, None)
+                st.success("Scenario setup confirmed. Scroll down to input assumptions and run the forecast.")
 
-            active_selection = confirmed_selection or {}
-            show_sliders = active_selection and any(active_selection.values())
+        confirmed_selection = st.session_state.get("mv_confirmed_selection", {})
+        confirmed_settings = st.session_state.get("mv_confirmed_settings")
+        has_confirmed_variables = bool(confirmed_selection) and any(confirmed_selection.values())
 
-            if show_sliders:
+        submitted_mv = False
+        if confirmed_settings and has_confirmed_variables:
+            with st.form("forecast_mv_run_form"):
+                st.caption(
+                    "Adjust the assumptions for your confirmed scenario variables, then generate the forecast."
+                )
                 col_inputs1, col_inputs2 = st.columns(2)
                 with col_inputs1:
-                    if active_selection.get("inc_defect_rate"):
-                        st.slider(
-                            "Assumed Defect Rate %",
-                            min_value=0.0,
-                            max_value=100.0,
-                            value=float(round(default_defect_rate, 2)),
-                            step=0.5,
-                            key="mv_defect_rate",
-                        )
-                    if active_selection.get("inc_shift_night"):
+                    if confirmed_selection.get("inc_shift_night"):
                         st.slider(
                             "Assumed Night Shift Share",
                             min_value=0.0,
@@ -540,7 +564,7 @@ def render_forecasting_view(_tables):
                             step=0.01,
                             key="mv_shift_night_share",
                         )
-                    if active_selection.get("inc_inspection"):
+                    if confirmed_selection.get("inc_inspection"):
                         st.slider(
                             "Assumed Inspection Coverage (fraction)",
                             min_value=0.0,
@@ -549,7 +573,7 @@ def render_forecasting_view(_tables):
                             step=0.01,
                             key="mv_inspection_cov",
                         )
-                    if active_selection.get("inc_headcount"):
+                    if confirmed_selection.get("inc_headcount"):
                         max_headcount = int(max(10, (headcount_default or 0) * 2))
                         st.slider(
                             "Assumed Operator Headcount",
@@ -559,26 +583,7 @@ def render_forecasting_view(_tables):
                             step=1,
                             key="mv_operator_headcount",
                         )
-                with col_inputs2:
-                    if active_selection.get("inc_energy"):
-                        st.slider(
-                            "Assumed Avg Energy Consumption",
-                            min_value=0.0,
-                            max_value=float(max(10.0, energy_default * 3 or 100.0)),
-                            value=energy_default,
-                            step=0.1,
-                            key="mv_avg_energy_consumption",
-                        )
-                    if active_selection.get("inc_wip_proxy"):
-                        st.slider(
-                            "Assumed WIP Proxy (fraction)",
-                            min_value=0.0,
-                            max_value=1.0,
-                            value=wip_default,
-                            step=0.01,
-                            key="mv_wip_proxy",
-                        )
-                    if active_selection.get("inc_eff_fte"):
+                    if confirmed_selection.get("inc_eff_fte"):
                         dynamic_cap = (headcount_default or 0) * 2
                         max_eff_fte = float(max(10.0, dynamic_cap if dynamic_cap > 0 else 10.0))
                         st.slider(
@@ -589,44 +594,65 @@ def render_forecasting_view(_tables):
                             step=0.1,
                             key="mv_effective_operator_fte",
                         )
-            else:
-                st.caption("Select scenario variables and confirm to configure assumptions.")
+                with col_inputs2:
+                    if confirmed_selection.get("inc_energy"):
+                        st.slider(
+                            "Assumed Avg Energy Consumption",
+                            min_value=0.0,
+                            max_value=float(max(10.0, energy_default * 3 or 100.0)),
+                            value=energy_default,
+                            step=0.1,
+                            key="mv_avg_energy_consumption",
+                        )
+                    if confirmed_selection.get("inc_wip_proxy"):
+                        st.slider(
+                            "Assumed WIP Proxy (fraction)",
+                            min_value=0.0,
+                            max_value=1.0,
+                            value=wip_default,
+                            step=0.01,
+                            key="mv_wip_proxy",
+                        )
+                    if confirmed_selection.get("inc_defect_rate"):
+                        st.slider(
+                            "Assumed Defect Rate %",
+                            min_value=0.0,
+                            max_value=100.0,
+                            value=float(round(default_defect_rate, 2)),
+                            step=0.5,
+                            key="mv_defect_rate",
+                        )
+                st.markdown("---")
+                submitted_mv = st.form_submit_button("Run Multivariate Scenario Forecast")
+        else:
+            st.caption("Confirm the scenario setup to enter assumptions and generate the forecast.")
 
-            st.markdown("---")
-            submitted_mv = st.form_submit_button("Generate Multivariate Scenario Forecast")
-
-        # Treat running the forecast as confirmation of the current selection (if any)
-        if submitted_mv:
-            current_selection_state = {
-                "inc_defect_rate": bool(st.session_state.get("mv_inc_defect", False)),
-                "inc_shift_night": bool(st.session_state.get("mv_inc_shift_night", False)),
-                "inc_inspection": bool(st.session_state.get("mv_inc_inspection_cov", False)),
-                "inc_headcount": bool(st.session_state.get("mv_inc_headcount", False)),
-                "inc_energy": bool(st.session_state.get("mv_inc_energy", False)),
-                "inc_wip_proxy": bool(st.session_state.get("mv_inc_wip_proxy", False)),
-                "inc_eff_fte": bool(st.session_state.get("mv_inc_eff_fte", False)),
-            }
-            if current_selection_state:
-                confirmed_selection = current_selection_state.copy()
-                st.session_state["mv_confirmed_selection"] = confirmed_selection
+        if submitted_mv and not confirmed_settings:
+            st.error("Scenario settings missing. Please confirm the setup again.")
+            submitted_mv = False
 
         if submitted_mv:
             scenario = {
-                "horizon": int(mv_horizon),
-                "adapt_horizon": bool(mv_adapt),
-                "horizon_multiplier": float(mv_multiplier),
-                "aggregation": {"freq": mv_agg_freq, "metric": mv_agg_metric},
+                "horizon": int(confirmed_settings.get("horizon", 60)),
+                "adapt_horizon": bool(confirmed_settings.get("adapt_horizon", True)),
+                "horizon_multiplier": float(confirmed_settings.get("horizon_multiplier", 1.0)),
+                "aggregation": {
+                    "freq": confirmed_settings.get("agg_freq", "D"),
+                    "metric": confirmed_settings.get("agg_metric", "mean"),
+                },
                 "included_variables": [],
                 "assumptions": {},
             }
-            # (operator_count, shift_type removed)
-            sel_defect = (confirmed_selection or {}).get("inc_defect_rate")
-            sel_shift = (confirmed_selection or {}).get("inc_shift_night")
-            sel_energy = (confirmed_selection or {}).get("inc_energy")
-            sel_wip = (confirmed_selection or {}).get("inc_wip_proxy")
-            sel_inspection = (confirmed_selection or {}).get("inc_inspection")
-            sel_headcount = (confirmed_selection or {}).get("inc_headcount")
-            sel_eff_fte = (confirmed_selection or {}).get("inc_eff_fte")
+            mv_connect = bool(confirmed_settings.get("connect", True))
+            mv_agg_metric = scenario["aggregation"]["metric"]
+
+            sel_defect = confirmed_selection.get("inc_defect_rate")
+            sel_shift = confirmed_selection.get("inc_shift_night")
+            sel_energy = confirmed_selection.get("inc_energy")
+            sel_wip = confirmed_selection.get("inc_wip_proxy")
+            sel_inspection = confirmed_selection.get("inc_inspection")
+            sel_headcount = confirmed_selection.get("inc_headcount")
+            sel_eff_fte = confirmed_selection.get("inc_eff_fte")
 
             if sel_defect:
                 fk = FEATURE_LABELS["Defect rate %"]
@@ -670,25 +696,10 @@ def render_forecasting_view(_tables):
                 scenario["assumptions"][fk] = float(
                     st.session_state.get("mv_effective_operator_fte", eff_fte_default)
                 )
-            # Debug safeguard: if inclusion unexpectedly empty but a checkbox was selected
-            if not scenario["included_variables"] and any(
-                [
-                    sel_defect,
-                    sel_shift,
-                    sel_energy,
-                    sel_wip,
-                    sel_inspection,
-                    sel_headcount,
-                    sel_eff_fte,
-                ]
-            ):
-                st.warning(
-                    "Debug: Scenario variable selection detected but inclusion list empty. Please rerun; if persists report a bug."
-                )
+
             st.session_state["multivariate_scenario"] = scenario
             try:
                 mv_path = "multivariate_forecasted_data.csv"
-                # Use in-memory forecast and diagnostics (no disk writes)
                 result = run_multivariate_forecast(_tables, scenario, return_meta=True)
                 if isinstance(result, tuple):
                     fc_mv, meta = result
@@ -709,7 +720,6 @@ def render_forecasting_view(_tables):
                     "Forecast (Scenario)",
                     fig_mv,
                 )
-                # Keep in session and provide CSV download from in-memory df
                 st.session_state["fc_mv_df"] = fc_mv.copy()
                 st.download_button(
                     label="Download CSV",
@@ -725,7 +735,6 @@ def render_forecasting_view(_tables):
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="dl_mv_fc_xlsx",
                 )
-                # Influence diagnostics (in-memory)
                 try:
                     low = (meta or {}).get("low_influence") or []
                     if low:
@@ -733,7 +742,6 @@ def render_forecasting_view(_tables):
                             "Low influence: the following scenario variable(s) had near-zero standardized coefficients and may have negligible effect: "
                             + ", ".join(low)
                         )
-                    # Historical low variation diagnostics (distinct from model influence)
                     hist_low = (meta or {}).get("historical_low_variation") or []
                     hist_stats = (meta or {}).get("historical_variation") or {}
                     if hist_low:
@@ -749,14 +757,12 @@ def render_forecasting_view(_tables):
                             "Low historical variation: the following scenario variable(s) had near-constant historical values and the model had little information to learn their effect. Future assumptions may produce abrupt steps.\n"
                             + "\n".join(msgs)
                         )
-                    # Measurement ambiguity: now provided by meta (list of ambiguous pairs)
                     amb_pairs = (meta or {}).get("measurement_ambiguity") or []
                     for pair in amb_pairs:
                         st.warning(
                             "Measurement caution: these features are measurement-linked and may have ambiguous attribution: "
                             + ", ".join(pair)
                         )
-                    # Collinearity caution between related labor variables
                     col_pairs = (meta or {}).get("collinearity_caution") or []
                     for pair in col_pairs:
                         st.warning(
